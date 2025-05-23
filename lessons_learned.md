@@ -15,3 +15,9 @@ This document will track key learnings, challenges, and insights gained during t
 - Ensuring cross-platform compatibility for `tshark` path discovery.
 - Accurately parsing `tshark`'s version output.
 - Handling `tshark` subprocess `stdout` and `stderr` streams efficiently in Go.
+
+## Preventing Infinite Packet Capture
+
+- **Problem**: Running `main.go` without a packet limit resulted in an infinite loop due to `tshark` continuously capturing packets, blocking the application from exiting.
+- **Solution**: Implemented a `PacketCount` option in the `Capture` struct and `WithPacketCount` function in `capture/capture.go`. This allows setting a limit on the number of packets `tshark` captures using the `-c` flag. `main.go` was updated to use `capture.WithPacketCount(10)` for testing purposes.
+- **Observation**: It's crucial to manage external processes like `tshark` by either setting explicit limits (e.g., packet count, duration) or implementing mechanisms to gracefully stop them to prevent resource exhaustion and infinite loops during development and testing.

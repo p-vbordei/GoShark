@@ -3,8 +3,9 @@ package capture
 import (
 	"io"
 	"os/exec"
+	"strconv"
 
-	"go_shark/tshark"
+	"GoShark/tshark"
 )
 
 // Capture represents a base for different tshark capture types.
@@ -17,6 +18,7 @@ type Capture struct {
 	Decodes       []string
 	EncryptionKeys []string
 	OverridePreferences []string
+	PacketCount   int
 	
 	cmd *exec.Cmd
 }
@@ -89,9 +91,20 @@ func WithOverridePreferences(prefs ...string) func(*Capture) {
 	}
 }
 
+// WithPacketCount sets the maximum number of packets to capture.
+func WithPacketCount(count int) func(*Capture) {
+	return func(c *Capture) {
+		c.PacketCount = count
+	}
+}
+
 // getTSharkArgs constructs the tshark command arguments based on the Capture configuration.
 func (c *Capture) getTSharkArgs() ([]string, error) {
 	args := []string{"-l", "-n"}
+
+	if c.PacketCount > 0 {
+		args = append(args, "-c", strconv.Itoa(c.PacketCount))
+	}
 
 	if c.UseJSON {
 		// Check tshark version for JSON support and --no-duplicate-keys
@@ -137,10 +150,25 @@ func (c *Capture) Start() (io.ReadCloser, io.ReadCloser, error) {
 
 	cmd, err := tshark.RunTSharkCommand(c.TSharkPath, args...)
 	if err != nil {
-		return nil, nil, err	}
+		return nil, nil, err
+	}
 	c.cmd = cmd
 
-	return cmd.Stdout, cmd.Stderr, nil
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	err = cmd.Start()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return stdout, stderr, nil
 }
 
 // Stop stops the tshark capture process.

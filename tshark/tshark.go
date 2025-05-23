@@ -125,8 +125,8 @@ func GetTSharkVersion(tsharkPath string) (string, error) {
 	return match, nil
 }
 
-// RunTSharkCommand executes the tshark command with the given arguments.
-// It returns ReadClosers for stdout and stderr, and an error if the command fails to start.
+// RunTSharkCommand prepares the tshark command with the given arguments.
+// It returns the exec.Cmd object, which can then be started by the caller.
 func RunTSharkCommand(tsharkPath string, args ...string) (*exec.Cmd, error) {
 	path, err := GetProcessPath(tsharkPath)
 	if err != nil {
@@ -134,14 +134,6 @@ func RunTSharkCommand(tsharkPath string, args ...string) (*exec.Cmd, error) {
 	}
 
 	cmd := exec.Command(path, args...)
-
-	// We don't need to explicitly set cmd.Stdout and cmd.Stderr to pipes here,
-	// as cmd.Start() will return pipes for them if they are nil.
-
-	err = cmd.Start()
-	if err != nil {
-		return nil, &TSharkCommandException{Msg: "failed to start tshark command: " + err.Error()}
-	}
 
 	return cmd, nil
 }
