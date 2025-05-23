@@ -2,7 +2,7 @@ package capture
 
 import (
 	"io"
-	"GoShark/tshark"
+	"GoShark/goshark/tshark"
 )
 
 // LiveCapture represents a live packet capture from a network interface.

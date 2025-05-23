@@ -7,28 +7,82 @@ import (
 	"log"
 	"sync"
 
-	"GoShark/capture"
-	"GoShark/packet"
-	"GoShark/tshark"
+	"GoShark/goshark/capture"
+	"GoShark/goshark/packet"
+	"GoShark/goshark/tshark"
 )
 
 func main() {
+	var stdout io.Reader
+	var stderr io.Reader
+
 	version, err := tshark.GetTSharkVersion("")
 	if err != nil {
 		log.Fatalf("Error getting TShark version: %v", err)
 	}
 	fmt.Printf("TShark Version: %s\n", version)
 
-	// Create a new live capture instance
-	liveCapture := capture.NewLiveCapture("lo0", capture.WithPacketCount(10)) // Use your network interface here, e.g., "eth0", "en0", "lo0"
+	// Live Capture Example (Commented Out for Display Filter Example)
+	/*
+	// Replace "en0" with your network interface name (e.g., "en0", "wlan0").
+	// You might need to run this program with elevated privileges (e.g., sudo) for live capture.
+	//
+	// Common BPF (Berkeley Packet Filter) Syntax Examples:
+	//   - "host 192.168.1.1": Traffic to or from a specific IP address.
+	//   - "src host 192.168.1.1": Traffic from a specific source IP address.
+	//   - "dst host 192.168.1.1": Traffic to a specific destination IP address.
+	//   - "port 80": Traffic to or from a specific port.
+	//   - "src port 80": Traffic from a specific source port.
+	//   - "dst port 80": Traffic to a specific destination port.
+	//   - "tcp": Only TCP traffic.
+	//   - "udp": Only UDP traffic.
+	//   - "icmp": Only ICMP traffic.
+	//   - "tcp port 80 or udp port 53": TCP on port 80 or UDP on port 53.
+	//   - "net 192.168.1.0/24": Traffic to or from a specific subnet.
+	liveCapture := capture.NewLiveCapture("en0",
+		capture.WithPacketCount(5),
+		capture.WithCaptureFilter("icmp"),
+	)
 
-	// Start the capture process
-	stdout, stderr, err := liveCapture.Start()
+	// Start the live capture process
+	stdout, stderr, err = liveCapture.Start()
 	if err != nil {
-		log.Fatalf("Error starting live capture: %v", err)
+		log.Fatalf("Failed to start live capture: %v", err)
 	}
 
 	fmt.Println("Starting live capture...")
+	*/
+
+	// File Capture Example with Display Filter
+	//	Common Wireshark Display Filter Syntax Examples:
+	//   - "ip.addr == 192.168.1.1": Packets where the IP source or destination is 192.168.1.1.
+	//   - "ip.src == 192.168.1.1": Packets from source IP 192.168.1.1.
+	//   - "ip.dst == 192.168.1.1": Packets to destination IP 192.168.1.1.
+	//   - "tcp.port == 80": TCP packets with source or destination port 80.
+	//   - "tcp.srcport == 80": TCP packets from source port 80.
+	//   - "tcp.dstport == 80": TCP packets to destination port 80.
+	//   - "http": Only HTTP protocol packets.
+	//   - "dns": Only DNS protocol packets.
+	//   - "tcp.flags.syn == 1 and tcp.flags.ack == 0": TCP SYN packets (start of handshake).
+	//   - "frame.len > 100": Packets with a length greater than 100 bytes.
+	//   - "not arp": Exclude ARP packets.
+	//   - "(ip.addr == 192.168.1.1 and tcp.port == 80) or udp.port == 53": Complex filter using logical operators.
+	// Create a new file capture instance
+	fileCapture, err := capture.NewFileCapture("non_existent.pcap",
+		capture.WithPacketCount(5),
+		capture.WithDisplayFilter("ip"),
+	)
+	if err != nil {
+		log.Fatalf("Error creating file capture: %v", err)
+	}
+
+	// Start the capture process
+	stdout, stderr, err = fileCapture.Start()
+	if err != nil {
+		log.Fatalf("Failed to start file capture: %v", err)
+	}
+
+	fmt.Println("Starting file capture with display filter...")
 
 	packetChan := make(chan []byte)
 	errorChan := make(chan error, 1) // Buffered to prevent deadlock on error
@@ -74,23 +128,33 @@ func main() {
 					break
 				}
 				
-				// Parse all packets from the collected JSON output
-				parsedPackets, err := packet.ParsePackets(packetBytes)
+				// Parse the packet
+				p, err := packet.NewPacketFromJSON(packetBytes)
 				if err != nil {
-					log.Printf("Error parsing packets: %v", err)
+					log.Printf("Error parsing packet JSON: %v", err)
 					continue
 				}
 
-				for _, parsedPacket := range parsedPackets {
-					fmt.Println("--- Captured Packet ---")
-					// Print some basic info from the parsed packet
-					if parsedPacket.Source.Layers != nil {
-						fmt.Println("Layers:")
-						for layerName := range parsedPacket.Source.Layers {
-							fmt.Printf("  - %s\n", layerName)
-						}
+				// Access packet layers and fields
+				fmt.Printf("Packet %s (Length: %s)\n", p.FrameNumber, p.FrameLen)
+				fmt.Printf("  Highest Layer: %s\n", p.HighestLayer())
+				fmt.Printf("  Transport Layer: %s\n", p.TransportLayer())
+
+				if ethLayer := p.GetLayer("eth"); ethLayer != nil {
+					fmt.Printf("  Ethernet Source: %v, Destination: %v\n", ethLayer.Fields["eth.src"], ethLayer.Fields["eth.dst"])
+				}
+				if ipLayer := p.GetLayer("ip"); ipLayer != nil {
+					fmt.Printf("  IP Source: %v, Destination: %v\n", ipLayer.Fields["ip.src"], ipLayer.Fields["ip.dst"])
+				}
+				if tcpLayer := p.GetLayer("tcp"); tcpLayer != nil {
+					fmt.Printf("  TCP Source Port: %v, Destination Port: %v\n", tcpLayer.Fields["tcp.srcport"], tcpLayer.Fields["tcp.dstport"])
+				}
+
+				// Example of accessing a specific field from a layer
+				if frameLayer := p.GetLayer("frame"); frameLayer != nil {
+					if timeField, ok := frameLayer.Fields["frame.time"]; ok {
+						fmt.Printf("  Frame Time: %v\n", timeField)
 					}
-					fmt.Println("-------------------------")
 				}
 
 			case err, ok := <-errorChan:
@@ -111,9 +175,9 @@ func main() {
 	wg.Wait()
 
 	// Ensure the tshark command has finished
-	if err := liveCapture.Wait(); err != nil {
+	if err := fileCapture.Wait(); err != nil {
 		log.Printf("TShark command finished with error: %v", err)
 	}
 
-	fmt.Println("Live capture finished.")
+	fmt.Println("File capture finished.")
 }

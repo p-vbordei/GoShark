@@ -1,11 +1,12 @@
 package capture
 
 import (
+	"fmt"
 	"io"
 	"os/exec"
 	"strconv"
 
-	"GoShark/tshark"
+	"GoShark/goshark/tshark"
 )
 
 // Capture represents a base for different tshark capture types.
@@ -19,6 +20,9 @@ type Capture struct {
 	EncryptionKeys []string
 	OverridePreferences []string
 	PacketCount   int
+	Snaplen       int
+	Promiscuous   bool
+	MonitorMode   bool
 	
 	cmd *exec.Cmd
 }
@@ -35,66 +39,97 @@ func NewCapture(options ...func(*Capture)) *Capture {
 	return c
 }
 
-// WithDisplayFilter sets the display filter for the capture.
+// WithDisplayFilter sets the Wireshark display filter for the capture (e.g., "http.request").
+// Corresponds to tshark's -Y flag.
 func WithDisplayFilter(filter string) func(*Capture) { 
 	return func(c *Capture) {
 		c.DisplayFilter = filter
 	}
 }
 
-// WithCaptureFilter sets the capture filter for the capture.
+// WithCaptureFilter sets the BPF capture filter for the capture (e.g., "tcp port 80").
+// Corresponds to tshark's -f flag.
 func WithCaptureFilter(filter string) func(*Capture) {
 	return func(c *Capture) {
 		c.CaptureFilter = filter
 	}
 }
 
-// WithTSharkPath sets the path to the tshark executable.
+// WithTSharkPath sets the absolute path to the tshark executable.
 func WithTSharkPath(path string) func(*Capture) {
 	return func(c *Capture) {
 		c.TSharkPath = path
 	}
 }
 
-// WithUseJSON sets whether to use JSON output from tshark.
+// WithUseJSON sets whether to use JSON output from tshark. If false, PDML is used.
+// Corresponds to tshark's -T json or -T pdml flags.
 func WithUseJSON(useJSON bool) func(*Capture) {
 	return func(c *Capture) {
 		c.UseJSON = useJSON
 	}
 }
 
-// WithIncludeRaw sets whether to include raw packet data in the output.
+// WithIncludeRaw sets whether to include raw packet data in the output. (Note: tshark JSON often includes raw data by default).
 func WithIncludeRaw(includeRaw bool) func(*Capture) {
 	return func(c *Capture) {
 		c.IncludeRaw = includeRaw
 	}
 }
 
-// WithDecodes adds decode-as rules.
+// WithDecodes adds decode-as rules (e.g., "tcp.port==8888,http").
+// Corresponds to tshark's -d flag.
 func WithDecodes(decodes ...string) func(*Capture) {
 	return func(c *Capture) {
 		c.Decodes = append(c.Decodes, decodes...)
 	}
 }
 
-// WithEncryptionKeys adds encryption keys.
+// WithEncryptionKeys adds WEP/WPA/WPA2 encryption keys (e.g., "wpa-pwd:password:ssid").
+// Corresponds to tshark's -o wlan.wep_keys flag.
 func WithEncryptionKeys(keys ...string) func(*Capture) {
 	return func(c *Capture) {
 		c.EncryptionKeys = append(c.EncryptionKeys, keys...)
 	}
 }
 
-// WithOverridePreferences adds override preferences.
+// WithOverridePreferences adds override preferences (e.g., "tcp.port:80").
+// Corresponds to tshark's -o flag.
 func WithOverridePreferences(prefs ...string) func(*Capture) {
 	return func(c *Capture) {
 		c.OverridePreferences = append(c.OverridePreferences, prefs...)
 	}
 }
 
-// WithPacketCount sets the maximum number of packets to capture.
+// WithPacketCount sets the maximum number of packets to capture. 0 means unlimited.
+// Corresponds to tshark's -c flag.
 func WithPacketCount(count int) func(*Capture) {
 	return func(c *Capture) {
 		c.PacketCount = count
+	}
+}
+
+// WithSnaplen sets the maximum number of bytes to capture per packet. 0 means unlimited.
+// Corresponds to tshark's -s flag.
+func WithSnaplen(snaplen int) func(*Capture) {
+	return func(c *Capture) {
+		c.Snaplen = snaplen
+	}
+}
+
+// WithPromiscuous sets whether to capture in promiscuous mode. True by default in tshark.
+// Corresponds to tshark's -p flag (disables promiscuous mode if -p is present).
+func WithPromiscuous(promiscuous bool) func(*Capture) {
+	return func(c *Capture) {
+		c.Promiscuous = promiscuous
+	}
+}
+
+// WithMonitorMode sets whether to capture in monitor mode. Applicable to wireless interfaces.
+// Corresponds to tshark's -I flag.
+func WithMonitorMode(monitorMode bool) func(*Capture) {
+	return func(c *Capture) {
+		c.MonitorMode = monitorMode
 	}
 }
 
@@ -106,6 +141,26 @@ func (c *Capture) getTSharkArgs() ([]string, error) {
 		args = append(args, "-c", strconv.Itoa(c.PacketCount))
 	}
 
+	if c.CaptureFilter != "" {
+		args = append(args, "-f", c.CaptureFilter)
+	}
+
+	if c.DisplayFilter != "" {
+		args = append(args, "-Y", c.DisplayFilter)
+	}
+
+	if c.Snaplen > 0 {
+		args = append(args, "-s", strconv.Itoa(c.Snaplen))
+	}
+
+	if !c.Promiscuous {
+		args = append(args, "-p")
+	}
+
+	if c.MonitorMode {
+		args = append(args, "-I")
+	}
+
 	if c.UseJSON {
 		// Check tshark version for JSON support and --no-duplicate-keys
 		// For now, assume modern tshark that supports JSON and --no-duplicate-keys
@@ -113,16 +168,6 @@ func (c *Capture) getTSharkArgs() ([]string, error) {
 	} else {
 		// Default to PDML if not JSON
 		args = append(args, "-T", "pdml")
-	}
-
-	if c.DisplayFilter != "" {
-		// In pyshark, it uses -Y for tshark >= 1.10.0 and -R for older.
-		// For simplicity, we'll assume a modern tshark and use -Y.
-		args = append(args, "-Y", c.DisplayFilter)
-	}
-
-	if c.CaptureFilter != "" {
-		args = append(args, "-f", c.CaptureFilter)
 	}
 
 	for _, decode := range c.Decodes {
@@ -173,16 +218,16 @@ func (c *Capture) Start() (io.ReadCloser, io.ReadCloser, error) {
 
 // Stop stops the tshark capture process.
 func (c *Capture) Stop() error {
-	if c.cmd != nil && c.cmd.Process != nil {
-		return c.cmd.Process.Kill()
+	if c.cmd == nil || c.cmd.Process == nil {
+		return fmt.Errorf("tshark process not started or already stopped")
 	}
-	return nil
+	return c.cmd.Process.Kill()
 }
 
 // Wait waits for the tshark command to finish.
 func (c *Capture) Wait() error {
-	if c.cmd != nil {
-		return c.cmd.Wait()
+	if c.cmd == nil {
+		return fmt.Errorf("tshark command not started")
 	}
-	return nil
+	return c.cmd.Wait()
 }
