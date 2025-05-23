@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strconv"
 
-	"GoShark/goshark/tshark"
+	"GoShark/tshark"
 )
 
 // Capture represents a base for different tshark capture types.
@@ -23,6 +23,8 @@ type Capture struct {
 	Snaplen       int
 	Promiscuous   bool
 	MonitorMode   bool
+	OutputFile    string
+	additionalArgs []string
 	
 	cmd *exec.Cmd
 }
@@ -133,9 +135,27 @@ func WithMonitorMode(monitorMode bool) func(*Capture) {
 	}
 }
 
+// WithOutputFile sets the output file for the capture.
+// Corresponds to tshark's -w flag.
+func WithOutputFile(outputFile string) func(*Capture) {
+	return func(c *Capture) {
+		c.OutputFile = outputFile
+	}
+}
+
+// SetCommandLineArgs sets additional command line arguments for tshark.
+func (c *Capture) SetCommandLineArgs(args ...string) {
+	c.additionalArgs = args
+}
+
 // getTSharkArgs constructs the tshark command arguments based on the Capture configuration.
 func (c *Capture) getTSharkArgs() ([]string, error) {
 	args := []string{"-l", "-n"}
+
+	// Add any additional arguments
+	if len(c.additionalArgs) > 0 {
+		args = append(args, c.additionalArgs...)
+	}
 
 	if c.PacketCount > 0 {
 		args = append(args, "-c", strconv.Itoa(c.PacketCount))
@@ -159,6 +179,11 @@ func (c *Capture) getTSharkArgs() ([]string, error) {
 
 	if c.MonitorMode {
 		args = append(args, "-I")
+	}
+
+	// If an output file is specified, add the -w flag
+	if c.OutputFile != "" {
+		args = append(args, "-w", c.OutputFile)
 	}
 
 	if c.UseJSON {
@@ -193,6 +218,12 @@ func (c *Capture) Start() (io.ReadCloser, io.ReadCloser, error) {
 		return nil, nil, err
 	}
 
+	return c.startWithArgs(args)
+}
+
+// startWithArgs starts the tshark capture process with the given arguments.
+// It returns readers for stdout and stderr.
+func (c *Capture) startWithArgs(args []string) (io.ReadCloser, io.ReadCloser, error) {
 	cmd, err := tshark.RunTSharkCommand(c.TSharkPath, args...)
 	if err != nil {
 		return nil, nil, err

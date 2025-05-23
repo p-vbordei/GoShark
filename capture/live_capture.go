@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"GoShark/goshark/tshark"
+	"GoShark/tshark"
 )
 
 // LiveCapture represents a live capture on a network interface.
@@ -106,8 +106,8 @@ func (lc *LiveCapture) Start() (stdout io.ReadCloser, stderr io.ReadCloser, err 
 		return nil, nil, fmt.Errorf("failed to get dumpcap stdout pipe: %w", err)
 	}
 
-	// Get dumpcap stderr
-	dumpcapStderr, err := dumpcapCmd.StderrPipe()
+	// Get dumpcap stderr for error logging
+	_, err = dumpcapCmd.StderrPipe()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get dumpcap stderr pipe: %w", err)
 	}

@@ -7,9 +7,9 @@ import (
 	"log"
 	"sync"
 
-	"GoShark/goshark/capture"
-	"GoShark/goshark/packet"
-	"GoShark/goshark/tshark"
+	"GoShark/capture"
+	"GoShark/packet"
+	"GoShark/tshark"
 )
 
 func main() {

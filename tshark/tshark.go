@@ -331,3 +331,27 @@ func GetDumpcapPath(tsharkPath string) (string, error) {
 
 	return tsharkDir + "dumpcap", nil
 }
+
+// GetTSharkPath returns the path to the tshark executable.
+func GetTSharkPath(tsharkPath string) (string, error) {
+	if tsharkPath != "" {
+		return tsharkPath, nil
+	}
+	return FindTShark()
+}
+
+// RunTSharkCommand creates and returns an exec.Cmd for a tshark command.
+func RunTSharkCommand(tsharkPath string, args ...string) (*exec.Cmd, error) {
+	// If tshark path is not provided, find it
+	if tsharkPath == "" {
+		var err error
+		tsharkPath, err = FindTShark()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Create the command
+	cmd := exec.Command(tsharkPath, args...)
+	return cmd, nil
+}
