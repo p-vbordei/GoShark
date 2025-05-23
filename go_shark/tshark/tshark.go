@@ -1,13 +1,11 @@
 package tshark
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
 	"path/filepath"
 	"regexp"
-	"strings"
 )
 
 // TSharkNotFoundException is an error returned when the tshark executable is not found.
@@ -19,58 +17,84 @@ func (e *TSharkNotFoundException) Error() string {
 	return e.Message
 }
 
-// GetProcessPath finds the path of the tshark executable.
-// It mirrors the functionality of pyshark's get_process_path.
-func GetProcessPath(tsharkPath string) (string, error) {
+// TSharkVersionException is returned when tshark version cannot be parsed.
+type TSharkVersionException struct { Msg string }
+
+func (e *TSharkVersionException) Error() string {
+	return "tshark version error: " + e.Msg
+}
+
+// TSharkCommandException is returned when a tshark command fails to execute.
+type TSharkCommandException struct { Msg string }
+
+func (e *TSharkCommandException) Error() string {
+	return "tshark command error: " + e.Msg
+}
+
+// getTSharkPath finds the path of the tshark executable.
+// It searches common locations based on the operating system.
+func getTSharkPath(tsharkPath string) (string, error) {
 	possiblePaths := []string{}
 
-	// Add user provided path to the search list
+	// Add user provided path first
 	if tsharkPath != "" {
-		var userTSharkPath string
+		var userTsharkPath string
 		if runtime.GOOS == "windows" {
-			userTSharkPath = filepath.Join(filepath.Dir(tsharkPath), "tshark.exe")
+			userTsharkPath = filepath.Join(filepath.Dir(tsharkPath), "tshark.exe")
 		} else {
-			userTSharkPath = filepath.Join(filepath.Dir(tsharkPath), "tshark")
+			userTsharkPath = filepath.Join(filepath.Dir(tsharkPath), "tshark")
 		}
-		possiblePaths = append([]string{userTSharkPath}, possiblePaths...)
+		possiblePaths = append(possiblePaths, userTsharkPath)
 	}
 
-	// Common paths based on OS
-	switch runtime.GOOS {
-	case "windows":
-		for _, env := range []string{"ProgramFiles(x86)", "ProgramFiles"} {
-			programFiles := os.Getenv(env)
-			if programFiles != "" {
-				possiblePaths = append(possiblePaths, filepath.Join(programFiles, "Wireshark", "tshark.exe"))
-			}
+	// Common paths for Windows
+	if runtime.GOOS == "windows" {
+		programFiles := os.Getenv("ProgramFiles")
+		if programFiles != "" {
+			possiblePaths = append(possiblePaths, filepath.Join(programFiles, "Wireshark", "tshark.exe"))
 		}
-	case "darwin":
+		programFilesX86 := os.Getenv("ProgramFiles(x86)")
+		if programFilesX86 != "" {
+			possiblePaths = append(possiblePaths, filepath.Join(programFilesX86, "Wireshark", "tshark.exe"))
+		}
+	} else if runtime.GOOS == "darwin" { // Common path for macOS
 		possiblePaths = append(possiblePaths, "/Applications/Wireshark.app/Contents/MacOS/tshark")
-		fallthrough // Also check common Unix paths
-	case "linux":
-		osPath := os.Getenv("PATH")
-		if osPath == "" {
-			osPath = "/usr/bin:/usr/sbin:/usr/lib/tshark:/usr/local/bin"
+	} else { // Common paths for Linux/Unix
+		pathEnv := os.Getenv("PATH")
+		if pathEnv == "" {
+			pathEnv = "/usr/bin:/usr/sbin:/usr/lib/tshark:/usr/local/bin"
 		}
-		for _, path := range filepath.SplitList(osPath) {
-			possiblePaths = append(possiblePaths, filepath.Join(path, "tshark"))
+		for _, p := range filepath.SplitList(pathEnv) {
+			possiblePaths = append(possiblePaths, filepath.Join(p, "tshark"))
 		}
 	}
+
 	for _, path := range possiblePaths {
 		if _, err := os.Stat(path); err == nil {
 			return path, nil
 		}
 	}
 
-	return "", &TSharkNotFoundException{Message: fmt.Sprintf("TShark not found. Searched these paths: %v", possiblePaths)}
+	// Fallback to looking in PATH using exec.LookPath
+	if p, err := exec.LookPath("tshark"); err == nil {
+		return p, nil
+	}
+
+	return "", &TSharkNotFoundException{Message: "tshark executable not found"}
+}
+
+// GetProcessPath finds the path of the tshark executable.
+// It mirrors the functionality of pyshark's get_process_path.
+func GetProcessPath(tsharkPath string) (string, error) {
+	return getTSharkPath(tsharkPath)
 }
 
 // splitLines splits a string by newline characters.
 func splitLines(s string) []string {
-	return strings.Split(s, "\n")
+	return regexp.MustCompile(`\r?\n`).Split(s, -1)
 }
 
-// GetTSharkVersion gets the tshark version.
+// GetTSharkVersion executes 'tshark -v' and parses the output to get the version.
 func GetTSharkVersion(tsharkPath string) (string, error) {
 	path, err := GetProcessPath(tsharkPath)
 	if err != nil {
@@ -78,31 +102,46 @@ func GetTSharkVersion(tsharkPath string) (string, error) {
 	}
 
 	cmd := exec.Command(path, "-v")
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("failed to run tshark -v: %w", err)
+		return "", &TSharkVersionException{Msg: "failed to execute tshark -v: " + err.Error()}
 	}
 
-	// Parse version from output
-	// This is a simplified version and might need more robust parsing
 	versionOutput := string(output)
 	lines := splitLines(versionOutput)
 	if len(lines) == 0 {
-		return "", fmt.Errorf("empty output from tshark -v")
+		return "", &TSharkVersionException{Msg: "empty output from tshark -v"}
 	}
-	
-	// Assuming the version is in the first line, similar to pyshark's approach
-	// A more robust regex might be needed here for production use
-	versionLine := lines[0]
-	// Example: Wireshark 3.4.6 (Git v3.4.6-0-g7789d20c)
-	// We need to extract 3.4.6
-	// This regex matches one or more digits, followed by a dot, repeated at least twice.
-	// It captures the entire version string.
+
+	// The version is usually on the first line, e.g., "TShark (Wireshark) 3.4.6 (Git v3.4.6...)"
+	firstLine := lines[0]
 	re := regexp.MustCompile(`\d+\.\d+\.\d+`)
-	match := re.FindString(versionLine)
+	match := re.FindString(firstLine)
+
 	if match == "" {
-		return "", fmt.Errorf("unable to parse TShark version from: %s", versionLine)
+		return "", &TSharkVersionException{Msg: "unable to parse version from: " + firstLine}
 	}
 
 	return match, nil
+}
+
+// RunTSharkCommand executes the tshark command with the given arguments.
+// It returns ReadClosers for stdout and stderr, and an error if the command fails to start.
+func RunTSharkCommand(tsharkPath string, args ...string) (*exec.Cmd, error) {
+	path, err := GetProcessPath(tsharkPath)
+	if err != nil {
+		return nil, err
+	}
+
+	cmd := exec.Command(path, args...)
+
+	// We don't need to explicitly set cmd.Stdout and cmd.Stderr to pipes here,
+	// as cmd.Start() will return pipes for them if they are nil.
+
+	err = cmd.Start()
+	if err != nil {
+		return nil, &TSharkCommandException{Msg: "failed to start tshark command: " + err.Error()}
+	}
+
+	return cmd, nil
 }
