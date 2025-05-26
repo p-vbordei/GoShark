@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os/exec"
 	"sync"
 
 	"GoShark/capture"
@@ -16,11 +17,13 @@ func main() {
 	var stdout io.Reader
 	var stderr io.Reader
 
-	version, err := tshark.GetTSharkVersion("")
+	// Use absolute path to tshark
+	cmd := exec.Command("/usr/bin/tshark", "-v")
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Fatalf("Error getting TShark version: %v", err)
+		log.Fatalf("Error executing tshark: %v\nOutput: %s", err, output)
 	}
-	fmt.Printf("TShark Version: %s\n", version)
+	fmt.Printf("TShark version:\n%s", output)
 
 	// Live Capture Example (Commented Out for Display Filter Example)
 	/*

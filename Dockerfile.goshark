@@ -1,0 +1,48 @@
+# Build stage
+FROM golang:1.24.3 AS build
+
+# Install TShark and dependencies
+RUN apt-get update && \
+    apt-get install -y tshark wireshark-common && \
+    groupadd -r wireshark && \
+    usermod -a -G wireshark root && \
+    chgrp wireshark /usr/bin/dumpcap && \
+    chmod 4750 /usr/bin/dumpcap && \
+    rm -rf /var/lib/apt/lists/*
+
+# Set up GoShark
+WORKDIR /app
+COPY . .
+
+# Build GoShark
+RUN go build -o GoShark main.go
+
+# Runtime stage
+FROM debian:stable-slim
+
+# Install all required dependencies
+RUN apt-get update && \
+    apt-get install -y \
+    tshark \
+    libpcap0.8 \
+    libwireshark-data \
+    libwsutil14 \
+    libwiretap13 \
+    libwireshark16 \
+    libcap2-bin \
+    wireshark-common && \
+    groupadd -r wireshark && \
+    usermod -a -G wireshark root && \
+    chgrp wireshark /usr/bin/dumpcap && \
+    chmod 4750 /usr/bin/dumpcap && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy GoShark binary
+COPY --from=build /app/GoShark /app/GoShark
+
+# Verify installation
+RUN tshark -v
+
+# Set entrypoint
+WORKDIR /app
+ENTRYPOINT ["/app/GoShark"]
