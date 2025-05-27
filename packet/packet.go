@@ -405,6 +405,15 @@ func (p *Packet) GetFieldRawBytes(layerName, fieldName string) []byte {
 	return p.RawData[fieldOffset.Start:fieldOffset.Start+fieldOffset.Length]
 }
 
+// GetLayers returns a map of all layers in the packet with their names as keys
+func (p *Packet) GetLayers() map[string]*Layer {
+	layers := make(map[string]*Layer)
+	for i := range p.Layers {
+		layers[p.Layers[i].Name] = &p.Layers[i]
+	}
+	return layers
+}
+
 // NewPacketFromJSON takes raw TShark JSON output for a single packet and unmarshals it into a Packet struct.
 // TShark JSON output is typically an array of packets, even for a single packet.
 func NewPacketFromJSON(data []byte) (*Packet, error) {

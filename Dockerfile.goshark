@@ -20,7 +20,7 @@ RUN go build -o GoShark main.go
 # Runtime stage
 FROM debian:stable-slim
 
-# Install all required dependencies
+# Install TShark and dependencies
 RUN apt-get update && \
     apt-get install -y \
     tshark \
@@ -37,12 +37,12 @@ RUN apt-get update && \
     chmod 4750 /usr/bin/dumpcap && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy GoShark binary
+# Copy built binary from build stage
 COPY --from=build /app/GoShark /app/GoShark
 
-# Verify installation
+# Verify TShark is installed and in PATH
 RUN tshark -v
 
-# Set entrypoint
 WORKDIR /app
-ENTRYPOINT ["/app/GoShark"]
+
+CMD ["./GoShark"]
