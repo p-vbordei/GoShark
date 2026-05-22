@@ -1,10 +1,10 @@
 package packet
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -211,94 +211,148 @@ func extractOffsets(fields map[string]interface{}, offsets map[string]*FieldOffs
 	}
 }
 
-// UnmarshalJSON custom unmarshaler for Packet to handle nested layers and frame info.
+// orderedLayer is one entry from the _source.layers object, in document order.
+type orderedLayer struct {
+	name string
+	raw  json.RawMessage
+}
+
+// decodeOrderedLayers walks a JSON object preserving key order. When a key's
+// value is an array (tshark merges duplicate layer keys under --no-duplicate-keys),
+// each element becomes its own entry so GetMultipleLayers keeps working.
+func decodeOrderedLayers(raw json.RawMessage) ([]orderedLayer, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	t, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if d, ok := t.(json.Delim); !ok || d != '{' {
+		return nil, fmt.Errorf("layers: expected JSON object")
+	}
+
+	var out []orderedLayer
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, _ := keyTok.(string)
+
+		var val json.RawMessage
+		if err := dec.Decode(&val); err != nil {
+			return nil, err
+		}
+
+		// Duplicate layer keys are merged by --no-duplicate-keys into an array
+		// of layer objects, which must be split back into separate layers.
+		// A "_raw" key instead carries a [hex, pos, size, ...] position array
+		// that must NOT be split — keep those as a single entry.
+		trimmed := bytes.TrimSpace(val)
+		if len(trimmed) > 0 && trimmed[0] == '[' && !strings.HasSuffix(key, "_raw") {
+			var arr []json.RawMessage
+			if err := json.Unmarshal(trimmed, &arr); err == nil && len(arr) > 0 {
+				allObjects := true
+				for _, el := range arr {
+					if e := bytes.TrimSpace(el); len(e) == 0 || e[0] != '{' {
+						allObjects = false
+						break
+					}
+				}
+				if allObjects {
+					for _, el := range arr {
+						out = append(out, orderedLayer{name: key, raw: el})
+					}
+					continue
+				}
+			}
+		}
+		out = append(out, orderedLayer{name: key, raw: val})
+	}
+	return out, nil
+}
+
+// coerceFieldString turns a tshark JSON field value into its string form.
+// Real tshark -T json emits plain strings; it also accepts a one-element array
+// or an object with a value/show key for robustness across output modes.
+func coerceFieldString(v interface{}) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(x)
+	case []interface{}:
+		if len(x) > 0 {
+			return coerceFieldString(x[0])
+		}
+	case map[string]interface{}:
+		for _, k := range []string{"value", "show"} {
+			if s, ok := x[k]; ok {
+				return coerceFieldString(s)
+			}
+		}
+	}
+	return ""
+}
+
+// UnmarshalJSON custom unmarshaler for Packet. It parses real tshark -T json
+// output, preserving the document order of protocol layers.
 func (p *Packet) UnmarshalJSON(data []byte) error {
-	// Use an auxiliary struct for initial unmarshaling to get _index and _source.layers
 	aux := struct {
 		Index  json.RawMessage `json:"_index"`
 		Source struct {
-			Layers map[string]json.RawMessage `json:"layers"`
+			Layers json.RawMessage `json:"layers"`
 		} `json:"_source"`
 	}{}
-
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 
-	// Unmarshal _index
+	// _index is usually a string, occasionally an object.
 	var indexStr string
 	if err := json.Unmarshal(aux.Index, &indexStr); err == nil {
 		p.Index.ProtocolID = indexStr
 	} else {
-		// Fallback to struct unmarshaling if it is a JSON object
-		if err := json.Unmarshal(aux.Index, &p.Index); err != nil {
-			return fmt.Errorf("failed to unmarshal _index: %w", err)
-		}
+		_ = json.Unmarshal(aux.Index, &p.Index)
 	}
 
-	// Process layers
-	p.Layers = make([]Layer, 0, len(aux.Source.Layers))
+	ordered, err := decodeOrderedLayers(aux.Source.Layers)
+	if err != nil {
+		return fmt.Errorf("failed to decode layers: %w", err)
+	}
 
-	// Check if raw frame data is available
-	if frameRawHex, ok := aux.Source.Layers["frame_raw"]; ok {
-		if hexStr, err := extractHexFromFrameRaw(frameRawHex); err == nil {
+	// Index raw siblings (frame_raw, ip_raw, ...) by base name for offsets.
+	rawByBase := map[string]json.RawMessage{}
+	for _, ol := range ordered {
+		if strings.HasSuffix(ol.name, "_raw") {
+			rawByBase[strings.TrimSuffix(ol.name, "_raw")] = ol.raw
+		}
+	}
+	if fr, ok := rawByBase["frame"]; ok {
+		if hexStr, err := extractHexFromFrameRaw(fr); err == nil {
 			hexStr = strings.ReplaceAll(hexStr, ":", "")
-			rawData, err := hex.DecodeString(hexStr)
-			if err == nil {
+			if rawData, err := hex.DecodeString(hexStr); err == nil {
 				p.RawData = rawData
 			}
 		}
 	}
 
-	// Unmarshal frame info and add frame layer first
-	if frameRaw, ok := aux.Source.Layers["frame"]; ok {
-		var frameLayer struct {
-			FrameNumber    []struct{ Value string } `json:"frame.number"`
-			FrameLen       []struct{ Value string } `json:"frame.len"`
-			FrameCapLen    []struct{ Value string } `json:"frame.cap_len"`
-			FrameTimeEpoch []struct{ Value string } `json:"frame.time_epoch"`
-			FrameTime      []struct{ Value string } `json:"frame.time"`
-			// Field position information
-			FrameOffset    []struct { 
-				Pos string `json:"pos"` 
-				Showname string `json:"showname"`
-				Size string `json:"size"`
-				Value string `json:"value"`
-			} `json:"frame.offset"`
+	p.Layers = make([]Layer, 0, len(ordered))
+	for _, ol := range ordered {
+		if strings.HasSuffix(ol.name, "_raw") {
+			continue
 		}
-		if err := json.Unmarshal(frameRaw, &frameLayer); err == nil {
-			// Extract frame info for easier access
-			if len(frameLayer.FrameNumber) > 0 {
-				p.FrameNumber = frameLayer.FrameNumber[0].Value
-			}
-			if len(frameLayer.FrameLen) > 0 {
-				p.FrameLen = frameLayer.FrameLen[0].Value
-			}
-			if len(frameLayer.FrameCapLen) > 0 {
-				p.FrameCapLen = frameLayer.FrameCapLen[0].Value
-			}
-			if len(frameLayer.FrameTimeEpoch) > 0 {
-				p.FrameTimeEpoch = frameLayer.FrameTimeEpoch[0].Value
-			}
-			if len(frameLayer.FrameTime) > 0 {
-				p.FrameTime = frameLayer.FrameTime[0].Value
-			}
+
+		layer := Layer{Name: ol.name, Offsets: make(map[string]*FieldOffset)}
+		if err := json.Unmarshal(ol.raw, &layer.Fields); err != nil {
+			return fmt.Errorf("failed to unmarshal %s layer: %w", ol.name, err)
 		}
-		
-		var frameFields map[string]interface{}
-		json.Unmarshal(frameRaw, &frameFields) // Unmarshal to generic map for Layer.Fields
-		
-		layer := Layer{
-			Name: "frame",
-			Fields: frameFields,
-			Offsets: make(map[string]*FieldOffset),
-			Pos: 0,
-		}
-		
-		// Parse frame_raw for frame layer's Pos and Len
-		if rawLayerBytes, ok := aux.Source.Layers["frame_raw"]; ok {
+
+		// Layer byte position/length from the matching _raw sibling.
+		if rawBytes, ok := rawByBase[ol.name]; ok {
 			var rawArr []interface{}
-			if err := json.Unmarshal(rawLayerBytes, &rawArr); err == nil && len(rawArr) >= 3 {
+			if err := json.Unmarshal(rawBytes, &rawArr); err == nil && len(rawArr) >= 3 {
 				if pos, ok1 := parseInt(rawArr[1]); ok1 {
 					layer.Pos = pos
 				}
@@ -307,40 +361,17 @@ func (p *Packet) UnmarshalJSON(data []byte) error {
 				}
 			}
 		}
-		extractOffsets(layer.Fields, layer.Offsets)
-		p.Layers = append(p.Layers, layer)
-	}
 
-	// Collect other layer names for sorting
-	var layerNames []string
-	for name := range aux.Source.Layers {
-		if name != "frame" && !strings.HasSuffix(name, "_raw") { // Skip frame and raw suffix keys
-			layerNames = append(layerNames, name)
-		}
-	}
-	sort.Strings(layerNames) // Sort alphabetically for consistent order
-
-	for _, layerName := range layerNames {
-		rawLayer := aux.Source.Layers[layerName]
-		layer := Layer{Name: layerName, Offsets: make(map[string]*FieldOffset)}
-		if err := json.Unmarshal(rawLayer, &layer.Fields); err != nil {
-			return fmt.Errorf("failed to unmarshal %s layer: %w", layerName, err)
-		}
-		
-		// Parse layerName_raw for layer Pos and Len
-		if rawLayerBytes, ok := aux.Source.Layers[layerName+"_raw"]; ok {
-			var rawArr []interface{}
-			if err := json.Unmarshal(rawLayerBytes, &rawArr); err == nil && len(rawArr) >= 3 {
-				if pos, ok1 := parseInt(rawArr[1]); ok1 {
-					layer.Pos = pos
-				}
-				if length, ok2 := parseInt(rawArr[2]); ok2 {
-					layer.Len = length
-				}
-			}
-		}
-		
 		extractOffsets(layer.Fields, layer.Offsets)
+
+		if ol.name == "frame" {
+			p.FrameNumber = coerceFieldString(layer.Fields["frame.number"])
+			p.FrameLen = coerceFieldString(layer.Fields["frame.len"])
+			p.FrameCapLen = coerceFieldString(layer.Fields["frame.cap_len"])
+			p.FrameTimeEpoch = coerceFieldString(layer.Fields["frame.time_epoch"])
+			p.FrameTime = coerceFieldString(layer.Fields["frame.time"])
+		}
+
 		p.Layers = append(p.Layers, layer)
 	}
 
