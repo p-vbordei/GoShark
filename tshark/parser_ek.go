@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"GoShark/packet"
-	"GoShark/packet/layers"
+	"github.com/p-vbordei/GoShark/packet"
+	"github.com/p-vbordei/GoShark/packet/layers"
 )
 
 // EKParser handles parsing of TShark Elastic Common Schema (-T ek) output.

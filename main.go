@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log"
 
-	"GoShark/capture"
-	"GoShark/packet"
-	"GoShark/tshark"
+	"github.com/p-vbordei/GoShark/capture"
+	"github.com/p-vbordei/GoShark/packet"
+	"github.com/p-vbordei/GoShark/tshark"
 )
 
 // GoShark demo: read the bundled test.pcap and print a summary of each packet.

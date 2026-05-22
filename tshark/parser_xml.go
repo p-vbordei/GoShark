@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"GoShark/packet"
-	"GoShark/packet/layers"
+	"github.com/p-vbordei/GoShark/packet"
+	"github.com/p-vbordei/GoShark/packet/layers"
 )
 
 // XMLParser handles parsing of TShark PDML (XML) output.

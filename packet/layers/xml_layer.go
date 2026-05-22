@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"GoShark/packet"
+	"github.com/p-vbordei/GoShark/packet"
 )
 
 // XMLLayer represents a layer parsed from XML output

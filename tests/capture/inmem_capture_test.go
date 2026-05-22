@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"GoShark/capture"
-	"GoShark/tests"
+	"github.com/p-vbordei/GoShark/capture"
+	"github.com/p-vbordei/GoShark/tests"
 )
 
 func TestInMemCapture(t *testing.T) {

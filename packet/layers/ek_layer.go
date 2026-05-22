@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"GoShark/tshark/ek_field_mapping"
+	"github.com/p-vbordei/GoShark/tshark/ek_field_mapping"
 )
 
 // EKLayer represents a layer parsed from Elastic Common Schema output

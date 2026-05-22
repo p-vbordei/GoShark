@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"GoShark/packet"
+	"github.com/p-vbordei/GoShark/packet"
 )
 
 func TestSessionKey(t *testing.T) {

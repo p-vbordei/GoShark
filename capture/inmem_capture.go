@@ -10,8 +10,8 @@ import (
 
 	"golang.org/x/mod/semver"
 
-	"GoShark/packet"
-	"GoShark/tshark"
+	"github.com/p-vbordei/GoShark/packet"
+	"github.com/p-vbordei/GoShark/tshark"
 )
 
 // LinkType represents the link layer type of a packet.

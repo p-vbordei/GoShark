@@ -6,8 +6,8 @@ import (
 	"io"
 	"strings"
 
-	"GoShark/packet"
-	"GoShark/packet/layers"
+	"github.com/p-vbordei/GoShark/packet"
+	"github.com/p-vbordei/GoShark/packet/layers"
 )
 
 // JSONParser handles parsing of TShark JSON output.

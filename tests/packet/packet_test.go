@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"GoShark/packet"
+	"github.com/p-vbordei/GoShark/packet"
 )
 
 func TestPacketRawData(t *testing.T) {
