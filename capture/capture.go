@@ -37,7 +37,8 @@ type Capture struct {
 	packets []*packet.Packet // Buffer populated by LoadPackets.
 	debug   bool             // When true, tshark stderr is logged.
 
-	cmd *exec.Cmd
+	cmd        *exec.Cmd
+	dumpcapCmd *exec.Cmd // Upstream dumpcap process feeding tshark in a live capture; nil otherwise.
 }
 
 // Option is a functional option for configuring captures.
@@ -338,6 +339,13 @@ func (c *Capture) startWithArgs(args []string) (io.ReadCloser, io.ReadCloser, er
 // Stop stops the tshark capture process. It is a no-op (no error) if the
 // process was never started, so Close is always safe to call.
 func (c *Capture) Stop() error {
+	// A live capture also runs an upstream dumpcap process feeding tshark. Kill
+	// and reap it so it does not linger as a zombie holding the capture
+	// interface open after the capture ends.
+	if c.dumpcapCmd != nil && c.dumpcapCmd.Process != nil {
+		c.dumpcapCmd.Process.Kill()
+		_ = c.dumpcapCmd.Wait()
+	}
 	if c.cmd == nil || c.cmd.Process == nil {
 		return nil
 	}
