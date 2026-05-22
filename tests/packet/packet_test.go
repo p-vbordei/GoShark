@@ -112,8 +112,8 @@ func TestPacketUnmarshalJSONOffsets(t *testing.T) {
           1
         ],
         "frame": {
-          "frame.number": [{"value": "1"}],
-          "frame.len": [{"value": "8"}]
+          "frame.number": "1",
+          "frame.len": "8"
         },
         "ip_raw": [
           "45000073",
