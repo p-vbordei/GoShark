@@ -105,6 +105,11 @@ func (p *XMLParser) ConvertPDMLPacket(pdmlPacket *PDMLPacket) (*packet.Packet, e
 	// Convert layers
 	pkt.Layers = make([]packet.Layer, 0, len(pdmlPacket.Layers))
 	for _, pdmlProto := range pdmlPacket.Layers {
+		// "fake-field-wrapper" is a PDML artifact wrapping anonymous fields;
+		// it is not a real protocol layer. pyshark filters these out.
+		if pdmlProto.Name == "fake-field-wrapper" || pdmlProto.Name == "" {
+			continue
+		}
 		layer, err := p.convertPDMLProto(&pdmlProto)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert PDML proto: %w", err)

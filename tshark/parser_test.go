@@ -168,6 +168,38 @@ func TestXMLParser(t *testing.T) {
 	}
 }
 
+// TestXMLDropsFakeFieldWrapper verifies that the PDML "fake-field-wrapper"
+// artifact layer is filtered out, as pyshark does.
+func TestXMLDropsFakeFieldWrapper(t *testing.T) {
+	xmlData := `<pdml><packet num="1">
+<proto name="frame"><field name="frame.number" show="1"/><field name="frame.len" show="119"/></proto>
+<proto name="ip"><field name="ip.src" show="127.0.0.1"/></proto>
+<proto name="tcp"><field name="tcp.srcport" show="58894"/></proto>
+<proto name="fake-field-wrapper"><field name="text" show="junk"/></proto>
+</packet></pdml>`
+
+	parser := NewXMLParser()
+	pkts, err := parser.ParsePackets(strings.NewReader(xmlData))
+	if err != nil {
+		t.Fatalf("ParsePackets failed: %v", err)
+	}
+	if len(pkts) != 1 {
+		t.Fatalf("Expected 1 packet, got %d", len(pkts))
+	}
+
+	for _, l := range pkts[0].Layers {
+		if l.Name == "fake-field-wrapper" {
+			t.Errorf("fake-field-wrapper layer should have been dropped")
+		}
+	}
+	if pkts[0].FrameNumber != "1" {
+		t.Errorf("FrameNumber = %q, want %q", pkts[0].FrameNumber, "1")
+	}
+	if pkts[0].HighestLayer() != "tcp" {
+		t.Errorf("HighestLayer = %q, want %q", pkts[0].HighestLayer(), "tcp")
+	}
+}
+
 func TestEKParser(t *testing.T) {
 	// EK document format uses JSON lines
 	// 1620067200 is 2021-05-03T18:40:00Z
