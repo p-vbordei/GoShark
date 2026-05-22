@@ -2,6 +2,7 @@ package layers
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"GoShark/packet"
@@ -206,19 +207,33 @@ func TestEKMultiField(t *testing.T) {
 	}
 }
 
-func TestPrettyPrintPanics(t *testing.T) {
-	// Let's test if PrettyPrint panics or not.
+// TestPrettyPrint verifies PrettyPrint/String work on every concrete layer
+// type. Each defines its own PrettyPrint because Go has no virtual dispatch:
+// the promoted BaseLayer.PrettyPrint would call BaseLayer.prettyPrintLayerFields
+// (which panics) rather than the concrete override.
+func TestPrettyPrint(t *testing.T) {
 	xmlLayer := NewXMLLayer("ip", false)
-	
-	// We run in a defer-recover to verify if it panics.
-	defer func() {
-		if r := recover(); r != nil {
-			t.Logf("PrettyPrint panicked as expected: %v", r)
-		} else {
-			t.Errorf("Expected PrettyPrint to panic or succeed, but it did not panic. Let's see if we should make it not panic.")
-		}
-	}()
+	xmlLayer.AddField(packet.NewLayerField("ip.src", "Source: 192.168.1.1", "c0a80101", "192.168.1.1", "no", "0", "0", ""))
+	var xb bytes.Buffer
+	xmlLayer.PrettyPrint(&xb)
+	if !strings.Contains(xb.String(), "Layer IP:") {
+		t.Errorf("XMLLayer.PrettyPrint missing header, got: %q", xb.String())
+	}
+	if xmlLayer.String() == "" {
+		t.Errorf("XMLLayer.String() returned empty")
+	}
 
-	var buf bytes.Buffer
-	xmlLayer.PrettyPrint(&buf)
+	jsonLayer := NewJSONLayer("ip", map[string]interface{}{"ip.src": "192.168.1.1"}, "ip", false)
+	var jb bytes.Buffer
+	jsonLayer.PrettyPrint(&jb)
+	if !strings.Contains(jb.String(), "Layer IP:") {
+		t.Errorf("JSONLayer.PrettyPrint missing header, got: %q", jb.String())
+	}
+
+	ekLayer := NewEKLayer("ip", map[string]interface{}{"ip_src": "192.168.1.1"})
+	var eb bytes.Buffer
+	ekLayer.PrettyPrint(&eb)
+	if !strings.Contains(eb.String(), "Layer IP:") {
+		t.Errorf("EKLayer.PrettyPrint missing header, got: %q", eb.String())
+	}
 }
