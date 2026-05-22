@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"GoShark/tshark"
+	"github.com/p-vbordei/GoShark/tshark"
 )
 
 // TestDataPath returns the absolute path to the test data directory.

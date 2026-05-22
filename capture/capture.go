@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"time"
 
-	"GoShark/packet"
-	"GoShark/packet/layers"
-	"GoShark/tshark"
+	"github.com/p-vbordei/GoShark/packet"
+	"github.com/p-vbordei/GoShark/packet/layers"
+	"github.com/p-vbordei/GoShark/tshark"
 )
 
 // Capture represents a base for different tshark capture types.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"GoShark/packet"
+	"github.com/p-vbordei/GoShark/packet"
 )
 
 func TestXMLLayer(t *testing.T) {

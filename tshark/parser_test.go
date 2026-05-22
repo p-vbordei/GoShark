@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"GoShark/packet/layers"
+	"github.com/p-vbordei/GoShark/packet/layers"
 )
 
 func TestJSONParser(t *testing.T) {

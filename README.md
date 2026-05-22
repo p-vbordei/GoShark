@@ -20,15 +20,21 @@ GoShark is a Go port of the Python [`pyshark`](https://github.com/KimiNewt/pysha
 
 ## Installation
 
-GoShark is currently consumed as a source module named `GoShark`. Clone and build it:
+Add GoShark to your project:
 
 ```bash
-git clone https://github.com/p-vbordei/GoShark.git
-cd GoShark
-go build ./...
+go get github.com/p-vbordei/GoShark
 ```
 
-Import packages as `GoShark/capture`, `GoShark/packet`, and `GoShark/tshark`.
+Then import the packages you need:
+
+```go
+import (
+	"github.com/p-vbordei/GoShark/capture"
+	"github.com/p-vbordei/GoShark/packet"
+	"github.com/p-vbordei/GoShark/tshark"
+)
+```
 
 ## Environment Variables
 
@@ -61,8 +67,8 @@ import (
 	"fmt"
 	"log"
 
-	"GoShark/capture"
-	"GoShark/packet"
+	"github.com/p-vbordei/GoShark/capture"
+	"github.com/p-vbordei/GoShark/packet"
 )
 
 func main() {

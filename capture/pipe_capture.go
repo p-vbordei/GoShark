@@ -5,7 +5,7 @@ import (
 	"io"
 	"os/exec"
 
-	"GoShark/tshark"
+	"github.com/p-vbordei/GoShark/tshark"
 )
 
 // PipeCapture represents a capture that reads packets from a pipe or reader.

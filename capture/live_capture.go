@@ -7,8 +7,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"GoShark/packet"
-	"GoShark/tshark"
+	"github.com/p-vbordei/GoShark/packet"
+	"github.com/p-vbordei/GoShark/tshark"
 )
 
 // LiveCapture represents a live capture on a network interface.

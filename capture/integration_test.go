@@ -8,8 +8,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"GoShark/packet"
-	"GoShark/tshark"
+	"github.com/p-vbordei/GoShark/packet"
+	"github.com/p-vbordei/GoShark/tshark"
 )
 
 // testPcap is the bundled 5-packet loopback/TCP capture, relative to capture/.

@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"GoShark/packet"
+	"github.com/p-vbordei/GoShark/packet"
 )
 
 // JSONLayer represents a layer parsed from JSON output

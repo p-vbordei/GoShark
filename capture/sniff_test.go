@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"GoShark/packet"
-	"GoShark/packet/layers"
+	"github.com/p-vbordei/GoShark/packet"
+	"github.com/p-vbordei/GoShark/packet/layers"
 )
 
 func TestSniffStreamJSON(t *testing.T) {

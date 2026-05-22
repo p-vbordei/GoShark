@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"GoShark/packet"
-	"GoShark/tshark"
+	"github.com/p-vbordei/GoShark/packet"
+	"github.com/p-vbordei/GoShark/tshark"
 )
 
 // FileCapture represents a packet capture from a file.
