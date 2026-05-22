@@ -526,6 +526,13 @@ func (c *Capture) sniffStream(ctx context.Context, stdout io.ReadCloser, stderr 
 // ApplyOnPackets applies the callback to all captured packets.
 // If the callback returns true, sniffing is stopped early.
 func (c *Capture) ApplyOnPackets(callback func(*packet.Packet) bool, ctx context.Context, startFunc func() (io.ReadCloser, io.ReadCloser, error)) error {
+	// Derive a cancelable context so that every early return (callback-stop or
+	// parent cancellation) unblocks the sniffStream producer goroutine. Without
+	// this, a producer blocked sending to the buffered channel after the
+	// consumer has left would leak the goroutine and its stdout/stderr pipes.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	stdout, stderr, err := startFunc()
 	if err != nil {
 		return err
