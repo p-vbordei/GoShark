@@ -103,6 +103,25 @@ func (l *EKLayer) GetFieldAsList(name string) []interface{} {
 	return []interface{}{fieldValue}
 }
 
+// PrettyPrint writes a formatted representation of the layer to writer.
+// It is defined on the concrete type because Go has no virtual dispatch: the
+// promoted BaseLayer.PrettyPrint would call BaseLayer.prettyPrintLayerFields.
+func (l *EKLayer) PrettyPrint(writer io.Writer) {
+	if l.LayerName == DataLayerName {
+		fmt.Fprint(writer, "DATA")
+		return
+	}
+	fmt.Fprintf(writer, "Layer %s:\n", strings.ToUpper(l.LayerName))
+	l.prettyPrintLayerFields(writer)
+}
+
+// String returns a formatted string representation of the layer.
+func (l *EKLayer) String() string {
+	var b strings.Builder
+	l.PrettyPrint(&b)
+	return b.String()
+}
+
 // prettyPrintLayerFields writes a formatted representation of the layer fields
 func (l *EKLayer) prettyPrintLayerFields(writer io.Writer) {
 	// Sort field names for consistent output

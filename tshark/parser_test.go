@@ -9,6 +9,8 @@ import (
 )
 
 func TestJSONParser(t *testing.T) {
+	// Real tshark -T json output: field values are plain strings, and the
+	// layers object is ordered (frame first).
 	jsonData := `[
 		{
 			"_index": "packets-2021-05-03",
@@ -17,9 +19,9 @@ func TestJSONParser(t *testing.T) {
 			"_source": {
 				"layers": {
 					"frame": {
-						"frame.number": [{"value": "1"}],
-						"frame.len": [{"value": "60"}],
-						"frame.time": [{"value": "May 3, 2021 18:40:00.000000000 UTC"}]
+						"frame.number": "1",
+						"frame.len": "60",
+						"frame.time": "May 3, 2021 18:40:00.000000000 UTC"
 					},
 					"ip": {
 						"ip.src": "192.168.1.1",
@@ -168,10 +170,45 @@ func TestXMLParser(t *testing.T) {
 	}
 }
 
+// TestXMLDropsFakeFieldWrapper verifies that the PDML "fake-field-wrapper"
+// artifact layer is filtered out, as pyshark does.
+func TestXMLDropsFakeFieldWrapper(t *testing.T) {
+	xmlData := `<pdml><packet num="1">
+<proto name="frame"><field name="frame.number" show="1"/><field name="frame.len" show="119"/></proto>
+<proto name="ip"><field name="ip.src" show="127.0.0.1"/></proto>
+<proto name="tcp"><field name="tcp.srcport" show="58894"/></proto>
+<proto name="fake-field-wrapper"><field name="text" show="junk"/></proto>
+</packet></pdml>`
+
+	parser := NewXMLParser()
+	pkts, err := parser.ParsePackets(strings.NewReader(xmlData))
+	if err != nil {
+		t.Fatalf("ParsePackets failed: %v", err)
+	}
+	if len(pkts) != 1 {
+		t.Fatalf("Expected 1 packet, got %d", len(pkts))
+	}
+
+	for _, l := range pkts[0].Layers {
+		if l.Name == "fake-field-wrapper" {
+			t.Errorf("fake-field-wrapper layer should have been dropped")
+		}
+	}
+	if pkts[0].FrameNumber != "1" {
+		t.Errorf("FrameNumber = %q, want %q", pkts[0].FrameNumber, "1")
+	}
+	if pkts[0].HighestLayer() != "tcp" {
+		t.Errorf("HighestLayer = %q, want %q", pkts[0].HighestLayer(), "tcp")
+	}
+}
+
 func TestEKParser(t *testing.T) {
-	// EK document format uses JSON lines
-	// 1620067200 is 2021-05-03T18:40:00Z
-	ekData := `{"_index":{"_type":"doc"},"_source":{"layers":{"frame":{"frame_number":"1","frame_len":"60","frame_time_epoch":"1620067200.000000000"},"ip":{"ip_src":"192.168.1.1","ip_dst":"192.168.1.2"}},"timestamp":"2021-05-03T18:40:00Z"}}`
+	// Real tshark -T ek output: NDJSON with an {"index":...} metadata line
+	// followed by a {"timestamp":...,"layers":...} packet line. Field names
+	// are underscore-flattened and double-prefixed; timestamp is epoch ms.
+	// 1620067200000 ms is 2021-05-03T18:40:00Z.
+	ekData := `{"index":{"_index":"packets-2021-05-03"}}
+{"timestamp":"1620067200000","layers":{"frame":{"frame_frame_number":"1","frame_frame_len":"60","frame_frame_time_epoch":"1620067200.000000000"},"ip":{"ip_ip_src":"192.168.1.1","ip_ip_dst":"192.168.1.2"}}}`
 
 	parser := NewEKParser(WithEKIncludeRaw(false))
 	pkts, err := parser.ParsePackets(strings.NewReader(ekData))
@@ -180,7 +217,7 @@ func TestEKParser(t *testing.T) {
 	}
 
 	if len(pkts) != 1 {
-		t.Fatalf("Expected 1 packet, got %d", len(pkts))
+		t.Fatalf("Expected 1 packet (index line skipped), got %d", len(pkts))
 	}
 
 	pkt := pkts[0]
@@ -199,29 +236,30 @@ func TestEKParser(t *testing.T) {
 		t.Errorf("Expected SniffTime %v, got %v", expectedTime, tVal.UTC())
 	}
 
-	// Verify EKLayer is populated
+	// Verify EKLayer is populated and document layer order is preserved.
 	ipLayer := pkt.GetLayer("ip")
 	if ipLayer == nil {
 		t.Fatalf("Expected ip layer")
 	}
-	if ipLayer.EKLayer == nil {
-		t.Errorf("Expected EKLayer to be populated on ip layer")
+	if _, ok := ipLayer.EKLayer.(*layers.EKLayer); !ok {
+		t.Fatalf("Expected *layers.EKLayer, got %T", ipLayer.EKLayer)
 	}
-	ekLayer, ok := ipLayer.EKLayer.(*layers.EKLayer)
-	if !ok {
-		t.Fatalf("Expected EKLayer type, got %T", ipLayer.EKLayer)
-	}
-	if ekLayer.GetField("src") != "192.168.1.1" {
-		t.Errorf("Expected src '192.168.1.1', got '%v'", ekLayer.GetField("src"))
+	if ipLayer.Fields["ip_ip_src"] != "192.168.1.1" {
+		t.Errorf("Expected ip_ip_src '192.168.1.1', got '%v'", ipLayer.Fields["ip_ip_src"])
 	}
 
-	// Test ParseSinglePacket
-	singlePkt, err := parser.ParseSinglePacket(ekData)
+	// Test ParseSinglePacket on a single packet line.
+	singlePkt, err := parser.ParseSinglePacket(`{"timestamp":"1620067200000","layers":{"frame":{"frame_frame_number":"7"}}}`)
 	if err != nil {
 		t.Fatalf("ParseSinglePacket failed: %v", err)
 	}
-	if singlePkt.FrameNumber != "1" {
-		t.Errorf("Expected FrameNumber '1', got '%s'", singlePkt.FrameNumber)
+	if singlePkt.FrameNumber != "7" {
+		t.Errorf("Expected FrameNumber '7', got '%s'", singlePkt.FrameNumber)
+	}
+
+	// An {"index":...} metadata line is not a packet.
+	if _, err := parser.ParseSinglePacket(`{"index":{"_index":"x"}}`); err == nil {
+		t.Errorf("ParseSinglePacket should reject an index metadata line")
 	}
 
 	// Test convenience functions

@@ -1,6 +1,7 @@
 package tshark
 
 import (
+	"regexp"
 	"testing"
 )
 
@@ -49,5 +50,23 @@ func TestRunTSharkCommand(t *testing.T) {
 	// Check that we got some output
 	if len(output) == 0 {
 		t.Error("Expected non-empty output from TShark command")
+	}
+}
+
+func TestGetTSharkVersionEmptyPath(t *testing.T) {
+	// This test will be skipped if tshark is not installed
+	if _, err := FindTShark(); err != nil {
+		t.Skipf("Skipping test because tshark is not installed: %v", err)
+	}
+
+	// An empty path must be resolved via FindTShark, like every other function here.
+	v, err := GetTSharkVersion("")
+	if err != nil {
+		t.Fatalf("GetTSharkVersion(\"\") failed: %v", err)
+	}
+
+	matched, _ := regexp.MatchString(`^v\d+\.\d+\.\d+$`, v)
+	if !matched {
+		t.Errorf("version %q does not match vX.Y.Z", v)
 	}
 }

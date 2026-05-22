@@ -8,6 +8,7 @@ import (
 	"io"
 	"os/exec"
 	"strconv"
+	"time"
 
 	"GoShark/packet"
 	"GoShark/packet/layers"
@@ -16,21 +17,26 @@ import (
 
 // Capture represents a base for different tshark capture types.
 type Capture struct {
-	DisplayFilter string
-	CaptureFilter string
-	TSharkPath    string
-	UseJSON       bool
-	IncludeRaw    bool
-	Decodes       []string
-	EncryptionKeys []string
+	DisplayFilter       string
+	CaptureFilter       string
+	TSharkPath          string
+	UseJSON             bool
+	IncludeRaw          bool
+	Decodes             []string
+	EncryptionKeys      []string
 	OverridePreferences []string
-	PacketCount   int
-	Snaplen       int
-	Promiscuous   bool
-	MonitorMode   bool
-	OutputFile    string
-	additionalArgs []string
-	
+	PacketCount         int
+	Snaplen             int
+	Promiscuous         bool
+	MonitorMode         bool
+	OutputFile          string
+	UseEK               bool // Use tshark's Elastic Common Schema (-T ek) output.
+	KeepPackets         bool // Retain packets passed through LoadPackets (pyshark keep_packets).
+	additionalArgs      []string
+
+	packets []*packet.Packet // Buffer populated by LoadPackets.
+	debug   bool             // When true, tshark stderr is logged.
+
 	cmd *exec.Cmd
 }
 
@@ -64,7 +70,8 @@ func getCapture(v interface{}) *Capture {
 // NewCapture creates a new base Capture object.
 func NewCapture(options ...Option) *Capture {
 	c := &Capture{
-		UseJSON: true, // Default to JSON output for easier parsing
+		UseJSON:     true, // Default to JSON output for easier parsing
+		KeepPackets: true, // Match pyshark's keep_packets=True default
 	}
 
 	for _, option := range options {
@@ -75,7 +82,7 @@ func NewCapture(options ...Option) *Capture {
 
 // WithDisplayFilter sets the Wireshark display filter for the capture (e.g., "http.request").
 // Corresponds to tshark's -Y flag.
-func WithDisplayFilter(filter string) Option { 
+func WithDisplayFilter(filter string) Option {
 	return func(v interface{}) {
 		if c := getCapture(v); c != nil {
 			c.DisplayFilter = filter
@@ -108,6 +115,26 @@ func WithUseJSON(useJSON bool) Option {
 	return func(v interface{}) {
 		if c := getCapture(v); c != nil {
 			c.UseJSON = useJSON
+		}
+	}
+}
+
+// WithUseEK selects tshark's Elastic Common Schema output (-T ek). It takes
+// precedence over WithUseJSON. Corresponds to pyshark's use_ek.
+func WithUseEK(useEK bool) Option {
+	return func(v interface{}) {
+		if c := getCapture(v); c != nil {
+			c.UseEK = useEK
+		}
+	}
+}
+
+// WithKeepPackets controls whether LoadPackets retains packets in memory for
+// later indexed access. Corresponds to pyshark's keep_packets (default true).
+func WithKeepPackets(keep bool) Option {
+	return func(v interface{}) {
+		if c := getCapture(v); c != nil {
+			c.KeepPackets = keep
 		}
 	}
 }
@@ -244,12 +271,15 @@ func (c *Capture) getTSharkArgs() ([]string, error) {
 		args = append(args, "-w", c.OutputFile)
 	}
 
-	if c.UseJSON {
-		// Check tshark version for JSON support and --no-duplicate-keys
-		// For now, assume modern tshark that supports JSON and --no-duplicate-keys
+	switch {
+	case c.UseEK:
+		// Elastic Common Schema: newline-delimited JSON.
+		args = append(args, "-T", "ek")
+	case c.UseJSON:
+		// Assume a modern tshark that supports JSON and --no-duplicate-keys.
 		args = append(args, "-T", "json", "--no-duplicate-keys")
-	} else {
-		// Default to PDML if not JSON
+	default:
+		// Default to PDML (XML).
 		args = append(args, "-T", "pdml")
 	}
 
@@ -305,12 +335,59 @@ func (c *Capture) startWithArgs(args []string) (io.ReadCloser, io.ReadCloser, er
 	return stdout, stderr, nil
 }
 
-// Stop stops the tshark capture process.
+// Stop stops the tshark capture process. It is a no-op (no error) if the
+// process was never started, so Close is always safe to call.
 func (c *Capture) Stop() error {
 	if c.cmd == nil || c.cmd.Process == nil {
-		return fmt.Errorf("tshark process not started or already stopped")
+		return nil
 	}
 	return c.cmd.Process.Kill()
+}
+
+// Close stops the capture, releasing the tshark process. pyshark's close().
+func (c *Capture) Close() error {
+	return c.Stop()
+}
+
+// SetDebug toggles logging of tshark's stderr to the standard logger.
+func (c *Capture) SetDebug(on bool) {
+	c.debug = on
+}
+
+// LoadPackets eagerly captures up to count packets (count <= 0 means all) and,
+// when KeepPackets is set, buffers them for indexed access via Get/Len/Packets.
+// startFunc launches the underlying tshark process (each capture type provides
+// its own); the concrete capture types expose a no-argument LoadPackets wrapper.
+func (c *Capture) LoadPackets(ctx context.Context, count int,
+	startFunc func() (io.ReadCloser, io.ReadCloser, error)) ([]*packet.Packet, error) {
+	c.packets = nil
+	n := 0
+	err := c.ApplyOnPackets(func(p *packet.Packet) bool {
+		if c.KeepPackets {
+			c.packets = append(c.packets, p)
+		}
+		n++
+		return count > 0 && n >= count
+	}, ctx, startFunc)
+	return c.packets, err
+}
+
+// Len returns the number of buffered packets (after LoadPackets).
+func (c *Capture) Len() int {
+	return len(c.packets)
+}
+
+// Get returns the i-th buffered packet, or nil if the index is out of range.
+func (c *Capture) Get(i int) *packet.Packet {
+	if i < 0 || i >= len(c.packets) {
+		return nil
+	}
+	return c.packets[i]
+}
+
+// Packets returns all buffered packets (after LoadPackets).
+func (c *Capture) Packets() []*packet.Packet {
+	return c.packets
 }
 
 // Wait waits for the tshark command to finish.
@@ -341,7 +418,37 @@ func (c *Capture) sniffStream(ctx context.Context, stdout io.ReadCloser, stderr 
 		defer close(outChan)
 		defer close(done)
 
-		if c.UseJSON {
+		if c.UseEK {
+			// EK output is newline-delimited JSON: one record per line,
+			// alternating {"index":...} metadata and packet records.
+			decoder := json.NewDecoder(stdout)
+			parser := tshark.NewEKParser(tshark.WithEKIncludeRaw(c.IncludeRaw))
+			for decoder.More() {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				var raw json.RawMessage
+				if err := decoder.Decode(&raw); err != nil {
+					return
+				}
+				pkt, ok, err := parser.ParseRecord(raw)
+				if err != nil {
+					return
+				}
+				if !ok {
+					continue // an {"index":...} metadata line
+				}
+
+				select {
+				case <-ctx.Done():
+					return
+				case outChan <- pkt:
+				}
+			}
+		} else if c.UseJSON {
 			decoder := json.NewDecoder(stdout)
 			// Read the first token which must be '['
 			t, err := decoder.Token()
@@ -419,6 +526,13 @@ func (c *Capture) sniffStream(ctx context.Context, stdout io.ReadCloser, stderr 
 // ApplyOnPackets applies the callback to all captured packets.
 // If the callback returns true, sniffing is stopped early.
 func (c *Capture) ApplyOnPackets(callback func(*packet.Packet) bool, ctx context.Context, startFunc func() (io.ReadCloser, io.ReadCloser, error)) error {
+	// Derive a cancelable context so that every early return (callback-stop or
+	// parent cancellation) unblocks the sniffStream producer goroutine. Without
+	// this, a producer blocked sending to the buffered channel after the
+	// consumer has left would leak the goroutine and its stdout/stderr pipes.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	stdout, stderr, err := startFunc()
 	if err != nil {
 		return err
@@ -444,4 +558,31 @@ func (c *Capture) ApplyOnPackets(callback func(*packet.Packet) bool, ctx context
 			}
 		}
 	}
+}
+
+// ApplyOnPacketsWithLimit is ApplyOnPackets with pyshark's packet_count and
+// timeout limits: it stops after packetCount packets (packetCount <= 0 means
+// unlimited) or once timeout elapses (timeout <= 0 means no timeout). Reaching
+// either limit is a normal stop, not an error.
+func (c *Capture) ApplyOnPacketsWithLimit(callback func(*packet.Packet) bool,
+	ctx context.Context, packetCount int, timeout time.Duration,
+	startFunc func() (io.ReadCloser, io.ReadCloser, error)) error {
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	n := 0
+	err := c.ApplyOnPackets(func(p *packet.Packet) bool {
+		n++
+		stop := callback(p)
+		return stop || (packetCount > 0 && n >= packetCount)
+	}, ctx, startFunc)
+
+	// A timeout is a normal stop condition rather than a failure.
+	if err == context.DeadlineExceeded {
+		return nil
+	}
+	return err
 }

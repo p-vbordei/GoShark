@@ -80,3 +80,43 @@ func TestLiveRingCaptureOptions(t *testing.T) {
 	assert.Equal(t, 5, lrc.NumRingFiles)
 	assert.Equal(t, "/tmp/test.pcap", lrc.RingFileName)
 }
+
+// containsPair reports whether args contains flag immediately followed by val.
+func containsPair(args []string, flag, val string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == val {
+			return true
+		}
+	}
+	return false
+}
+
+func TestLiveCaptureDumpcapParams(t *testing.T) {
+	lc, err := NewLiveCapture([]string{"en0"}, WithBPFFilter("tcp"))
+	assert.NoError(t, err)
+
+	params := lc.getDumpcapParameters()
+	assert.True(t, containsPair(params, "-f", "tcp"), "dumpcap params should include the BPF filter")
+	assert.True(t, containsPair(params, "-i", "en0"), "dumpcap params should include the interface")
+	assert.True(t, containsPair(params, "-w", "-"), "dumpcap should write to stdout")
+}
+
+func TestLiveRingTSharkArgs(t *testing.T) {
+	lrc, err := NewLiveRingCapture([]string{"eth0"},
+		WithRingFileSize(2048), WithNumRingFiles(5), WithRingFileName("/tmp/test.pcap"))
+	assert.NoError(t, err)
+
+	args, err := lrc.getRingTSharkArgs()
+	assert.NoError(t, err)
+	assert.True(t, containsPair(args, "-b", "filesize:2048"), "ring args should set the file size")
+	assert.True(t, containsPair(args, "-b", "files:5"), "ring args should set the file count")
+	assert.True(t, containsPair(args, "-w", "/tmp/test.pcap"), "ring args should set the output file")
+	assert.True(t, containsPair(args, "-i", "eth0"), "ring args should include the interface")
+}
+
+func TestEKTSharkArgs(t *testing.T) {
+	cap := NewCapture(WithUseEK(true))
+	args, err := cap.getTSharkArgs()
+	assert.NoError(t, err)
+	assert.True(t, containsPair(args, "-T", "ek"), "UseEK should select -T ek")
+}

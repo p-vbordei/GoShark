@@ -59,7 +59,7 @@ func TestPacketWithLayers(t *testing.T) {
 	}
 
 	p := &packet.Packet{
-		Layers: []packet.Layer{ethLayer, ipLayer},
+		Layers:  []packet.Layer{ethLayer, ipLayer},
 		RawData: []byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x08, 0x00, 0x45, 0x00, 0x00, 0x14, 0x00, 0x00, 0x40, 0x00, 0x40, 0x06, 0x00, 0x00, 0xc0, 0xa8, 0x01, 0x01, 0xc0, 0xa8, 0x01, 0x02},
 	}
 
@@ -112,8 +112,8 @@ func TestPacketUnmarshalJSONOffsets(t *testing.T) {
           1
         ],
         "frame": {
-          "frame.number": [{"value": "1"}],
-          "frame.len": [{"value": "8"}]
+          "frame.number": "1",
+          "frame.len": "8"
         },
         "ip_raw": [
           "45000073",
@@ -166,4 +166,3 @@ func TestPacketUnmarshalJSONOffsets(t *testing.T) {
 	ipSrcRaw := p.GetFieldRawBytes("ip", "ip.src")
 	assert.Equal(t, []byte{0x45, 0x00, 0x00, 0x73}, ipSrcRaw, "IP src field raw bytes should be extracted correctly")
 }
-

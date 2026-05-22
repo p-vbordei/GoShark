@@ -104,6 +104,25 @@ func (l *XMLLayer) GetLayerName() string {
 	return l.LayerName
 }
 
+// PrettyPrint writes a formatted representation of the layer to writer.
+// It is defined on the concrete type because Go has no virtual dispatch: the
+// promoted BaseLayer.PrettyPrint would call BaseLayer.prettyPrintLayerFields.
+func (l *XMLLayer) PrettyPrint(writer io.Writer) {
+	if l.LayerName == DataLayerName {
+		fmt.Fprint(writer, "DATA")
+		return
+	}
+	fmt.Fprintf(writer, "Layer %s:\n", strings.ToUpper(l.LayerName))
+	l.prettyPrintLayerFields(writer)
+}
+
+// String returns a formatted string representation of the layer.
+func (l *XMLLayer) String() string {
+	var b strings.Builder
+	l.PrettyPrint(&b)
+	return b.String()
+}
+
 // prettyPrintLayerFields writes a formatted representation of the layer fields
 func (l *XMLLayer) prettyPrintLayerFields(writer io.Writer) {
 	for _, fieldLine := range l.getAllFieldLines() {

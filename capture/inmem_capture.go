@@ -19,10 +19,10 @@ type LinkType int
 
 // Define common LinkType constants mirroring pyshark's LinkTypes.
 const (
-	LinkTypeNull     LinkType = 0
-	LinkTypeEthernet LinkType = 1
-	LinkTypeIEEE802_5 LinkType = 6
-	LinkTypePPP      LinkType = 9
+	LinkTypeNull       LinkType = 0
+	LinkTypeEthernet   LinkType = 1
+	LinkTypeIEEE802_5  LinkType = 6
+	LinkTypePPP        LinkType = 9
 	LinkTypeIEEE802_11 LinkType = 105
 )
 
@@ -35,19 +35,20 @@ type InMemCapture struct {
 		Stderr  io.ReadCloser
 		Stdin   io.WriteCloser
 	}
-	packets         []*packet.Packet
+	packets           []*packet.Packet
 	pcapHeaderWritten bool
-	outputFile      *os.File
+	outputFile        *os.File
 }
 
 // NewInMemCapture creates a new InMemCapture instance.
 func NewInMemCapture(options ...Option) *InMemCapture {
 	c := &InMemCapture{
 		Capture: Capture{
-			UseJSON: true,
+			UseJSON:     true,
+			KeepPackets: true,
 		},
-		currentLinkType: LinkTypeEthernet,
-		packets:         make([]*packet.Packet, 0),
+		currentLinkType:   LinkTypeEthernet,
+		packets:           make([]*packet.Packet, 0),
 		pcapHeaderWritten: false,
 	}
 
@@ -128,24 +129,24 @@ func (c *InMemCapture) getTSharkProcess() error {
 
 // writePCAPHeader writes a PCAP file header to the given writer.
 func (c *InMemCapture) writePCAPHeader(writer io.Writer) error {
-	// PCAP header format: magic number, version major, version minor, 
+	// PCAP header format: magic number, version major, version minor,
 	// timezone offset, timestamp accuracy, snapshot length, link type
 	header := struct {
-		MagicNumber  uint32 // 0xa1b2c3d4
-		VersionMajor uint16 // 2
-		VersionMinor uint16 // 4
-		TimezoneOffset uint32 // 0
+		MagicNumber       uint32 // 0xa1b2c3d4
+		VersionMajor      uint16 // 2
+		VersionMinor      uint16 // 4
+		TimezoneOffset    uint32 // 0
 		TimestampAccuracy uint32 // 0
-		SnapshotLength uint32 // 0x7fff (32767)
-		LinkType     uint32 // Ethernet, etc.
+		SnapshotLength    uint32 // 0x7fff (32767)
+		LinkType          uint32 // Ethernet, etc.
 	}{
-		MagicNumber:  0xa1b2c3d4,
-		VersionMajor: 2,
-		VersionMinor: 4,
-		TimezoneOffset: 0,
+		MagicNumber:       0xa1b2c3d4,
+		VersionMajor:      2,
+		VersionMinor:      4,
+		TimezoneOffset:    0,
 		TimestampAccuracy: 0,
-		SnapshotLength: 0x7fff,
-		LinkType:     uint32(c.currentLinkType),
+		SnapshotLength:    0x7fff,
+		LinkType:          uint32(c.currentLinkType),
 	}
 
 	err := binary.Write(writer, binary.LittleEndian, header)

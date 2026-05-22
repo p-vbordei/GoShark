@@ -39,7 +39,7 @@ func WithXMLIncludeRaw(includeRaw bool) func(*XMLParser) {
 
 // PDML represents the root element of TShark's PDML output.
 type PDML struct {
-	XMLName xml.Name `xml:"pdml"`
+	XMLName xml.Name     `xml:"pdml"`
 	Packets []PDMLPacket `xml:"packet"`
 }
 
@@ -52,9 +52,9 @@ type PDMLPacket struct {
 
 // PDMLProto represents a protocol layer in TShark's PDML output.
 type PDMLProto struct {
-	XMLName xml.Name   `xml:"proto"`
-	Name    string     `xml:"name,attr"`
-	Showname string     `xml:"showname,attr"`
+	XMLName  xml.Name    `xml:"proto"`
+	Name     string      `xml:"name,attr"`
+	Showname string      `xml:"showname,attr"`
 	Fields   []PDMLField `xml:"field"`
 }
 
@@ -105,6 +105,13 @@ func (p *XMLParser) ConvertPDMLPacket(pdmlPacket *PDMLPacket) (*packet.Packet, e
 	// Convert layers
 	pkt.Layers = make([]packet.Layer, 0, len(pdmlPacket.Layers))
 	for _, pdmlProto := range pdmlPacket.Layers {
+		// "fake-field-wrapper" wraps anonymous fields and "geninfo" is a
+		// synthetic "General information" pseudo-protocol — neither is a real
+		// on-wire layer, and the JSON output mode emits neither. Drop both so
+		// the JSON and PDML paths yield the same layer set.
+		if pdmlProto.Name == "fake-field-wrapper" || pdmlProto.Name == "geninfo" || pdmlProto.Name == "" {
+			continue
+		}
 		layer, err := p.convertPDMLProto(&pdmlProto)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert PDML proto: %w", err)
@@ -218,6 +225,11 @@ func (p *XMLParser) convertPDMLField(layer *packet.Layer, pdmlField *PDMLField) 
 func (p *XMLParser) extractFrameInfo(pkt *packet.Packet, pdmlProto *PDMLProto) {
 	for _, pdmlField := range pdmlProto.Fields {
 		switch pdmlField.Name {
+		case "frame.number":
+			// PDML <packet> carries no num attribute; take it from the field.
+			if pkt.FrameNumber == "" {
+				pkt.FrameNumber = pdmlField.Show
+			}
 		case "frame.time_epoch":
 			pkt.FrameTimeEpoch = pdmlField.Show
 		case "frame.time":

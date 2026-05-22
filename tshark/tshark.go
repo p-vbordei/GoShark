@@ -6,8 +6,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"runtime"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -58,7 +58,7 @@ func FindTShark() (string, error) {
 		possiblePaths = append(possiblePaths,
 			"/usr/bin/tshark",
 			"/usr/local/bin/tshark",
-			"/opt/homebrew/bin/tshark", // For macOS Homebrew
+			"/opt/homebrew/bin/tshark",               // For macOS Homebrew
 			"/opt/homebrew/opt/wireshark/bin/tshark", // macOS Homebrew Wireshark package path
 			"/usr/sbin/tshark",
 		)
@@ -82,6 +82,16 @@ func FindTShark() (string, error) {
 
 // GetTSharkVersion retrieves the version of the TShark executable.
 func GetTSharkVersion(tsharkPath string) (string, error) {
+	// Resolve an empty path via FindTShark, consistent with every other
+	// function in this package that accepts a tsharkPath argument.
+	if tsharkPath == "" {
+		var err error
+		tsharkPath, err = FindTShark()
+		if err != nil {
+			return "", err
+		}
+	}
+
 	cmd := exec.Command(tsharkPath, "-v")
 	output, err := cmd.Output()
 	if err != nil {
@@ -127,7 +137,7 @@ type TSharkProcess struct {
 
 // TSharkProcessOptions contains options for creating a new TShark process.
 type TSharkProcessOptions struct {
-	TSharkPath      string        // Path to the tshark executable
+	TSharkPath     string        // Path to the tshark executable
 	Args           []string      // Command-line arguments for tshark
 	Timeout        time.Duration // Timeout for the process
 	CaptureTimeout time.Duration // Timeout for the capture itself
