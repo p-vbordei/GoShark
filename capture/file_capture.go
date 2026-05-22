@@ -20,7 +20,8 @@ type FileCapture struct {
 func NewFileCapture(filePath string, options ...Option) (*FileCapture, error) {
 	c := &FileCapture{
 		Capture: Capture{
-			UseJSON: true,
+			UseJSON:     true,
+			KeepPackets: true,
 		},
 		FilePath: filePath,
 	}
@@ -95,4 +96,10 @@ func (c *FileCapture) ApplyOnPackets(callback func(*packet.Packet) bool, ctx con
 	return c.Capture.ApplyOnPackets(callback, ctx, func() (io.ReadCloser, io.ReadCloser, error) {
 		return c.Start()
 	})
+}
+
+// LoadPackets eagerly reads up to count packets from the file (count <= 0 means
+// all) and buffers them for indexed access via Get/Len/Packets.
+func (c *FileCapture) LoadPackets(ctx context.Context, count int) ([]*packet.Packet, error) {
+	return c.Capture.LoadPackets(ctx, count, c.Start)
 }

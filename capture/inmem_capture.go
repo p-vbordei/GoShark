@@ -44,7 +44,8 @@ type InMemCapture struct {
 func NewInMemCapture(options ...Option) *InMemCapture {
 	c := &InMemCapture{
 		Capture: Capture{
-			UseJSON: true,
+			UseJSON:     true,
+			KeepPackets: true,
 		},
 		currentLinkType: LinkTypeEthernet,
 		packets:         make([]*packet.Packet, 0),

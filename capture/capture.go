@@ -29,8 +29,13 @@ type Capture struct {
 	Promiscuous   bool
 	MonitorMode   bool
 	OutputFile    string
+	UseEK         bool // Use tshark's Elastic Common Schema (-T ek) output.
+	KeepPackets   bool // Retain packets passed through LoadPackets (pyshark keep_packets).
 	additionalArgs []string
-	
+
+	packets []*packet.Packet // Buffer populated by LoadPackets.
+	debug   bool             // When true, tshark stderr is logged.
+
 	cmd *exec.Cmd
 }
 
@@ -64,7 +69,8 @@ func getCapture(v interface{}) *Capture {
 // NewCapture creates a new base Capture object.
 func NewCapture(options ...Option) *Capture {
 	c := &Capture{
-		UseJSON: true, // Default to JSON output for easier parsing
+		UseJSON:     true, // Default to JSON output for easier parsing
+		KeepPackets: true, // Match pyshark's keep_packets=True default
 	}
 
 	for _, option := range options {
@@ -108,6 +114,26 @@ func WithUseJSON(useJSON bool) Option {
 	return func(v interface{}) {
 		if c := getCapture(v); c != nil {
 			c.UseJSON = useJSON
+		}
+	}
+}
+
+// WithUseEK selects tshark's Elastic Common Schema output (-T ek). It takes
+// precedence over WithUseJSON. Corresponds to pyshark's use_ek.
+func WithUseEK(useEK bool) Option {
+	return func(v interface{}) {
+		if c := getCapture(v); c != nil {
+			c.UseEK = useEK
+		}
+	}
+}
+
+// WithKeepPackets controls whether LoadPackets retains packets in memory for
+// later indexed access. Corresponds to pyshark's keep_packets (default true).
+func WithKeepPackets(keep bool) Option {
+	return func(v interface{}) {
+		if c := getCapture(v); c != nil {
+			c.KeepPackets = keep
 		}
 	}
 }
@@ -305,12 +331,59 @@ func (c *Capture) startWithArgs(args []string) (io.ReadCloser, io.ReadCloser, er
 	return stdout, stderr, nil
 }
 
-// Stop stops the tshark capture process.
+// Stop stops the tshark capture process. It is a no-op (no error) if the
+// process was never started, so Close is always safe to call.
 func (c *Capture) Stop() error {
 	if c.cmd == nil || c.cmd.Process == nil {
-		return fmt.Errorf("tshark process not started or already stopped")
+		return nil
 	}
 	return c.cmd.Process.Kill()
+}
+
+// Close stops the capture, releasing the tshark process. pyshark's close().
+func (c *Capture) Close() error {
+	return c.Stop()
+}
+
+// SetDebug toggles logging of tshark's stderr to the standard logger.
+func (c *Capture) SetDebug(on bool) {
+	c.debug = on
+}
+
+// LoadPackets eagerly captures up to count packets (count <= 0 means all) and,
+// when KeepPackets is set, buffers them for indexed access via Get/Len/Packets.
+// startFunc launches the underlying tshark process (each capture type provides
+// its own); the concrete capture types expose a no-argument LoadPackets wrapper.
+func (c *Capture) LoadPackets(ctx context.Context, count int,
+	startFunc func() (io.ReadCloser, io.ReadCloser, error)) ([]*packet.Packet, error) {
+	c.packets = nil
+	n := 0
+	err := c.ApplyOnPackets(func(p *packet.Packet) bool {
+		if c.KeepPackets {
+			c.packets = append(c.packets, p)
+		}
+		n++
+		return count > 0 && n >= count
+	}, ctx, startFunc)
+	return c.packets, err
+}
+
+// Len returns the number of buffered packets (after LoadPackets).
+func (c *Capture) Len() int {
+	return len(c.packets)
+}
+
+// Get returns the i-th buffered packet, or nil if the index is out of range.
+func (c *Capture) Get(i int) *packet.Packet {
+	if i < 0 || i >= len(c.packets) {
+		return nil
+	}
+	return c.packets[i]
+}
+
+// Packets returns all buffered packets (after LoadPackets).
+func (c *Capture) Packets() []*packet.Packet {
+	return c.packets
 }
 
 // Wait waits for the tshark command to finish.

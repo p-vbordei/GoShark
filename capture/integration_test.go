@@ -106,6 +106,26 @@ func TestInMemCaptureIntegration(t *testing.T) {
 	require.Equal(t, "tcp", p.TransportLayer())
 }
 
+func TestCaptureLoadPackets(t *testing.T) {
+	requireTShark(t)
+
+	fc, err := NewFileCapture(testPcap)
+	require.NoError(t, err)
+
+	pkts, err := fc.LoadPackets(context.Background(), 3)
+	require.NoError(t, err)
+	require.Len(t, pkts, 3, "LoadPackets(3) should buffer exactly 3 packets")
+	require.Equal(t, 3, fc.Len())
+	require.Equal(t, "1", fc.Get(0).FrameNumber)
+	require.Equal(t, "2", fc.Get(1).FrameNumber)
+	require.Nil(t, fc.Get(99), "out-of-range index returns nil")
+
+	// count == 0 means "all packets".
+	all, err := fc.LoadPackets(context.Background(), 0)
+	require.NoError(t, err)
+	require.Len(t, all, 5)
+}
+
 func TestPipeCaptureIntegration(t *testing.T) {
 	requireTShark(t)
 
