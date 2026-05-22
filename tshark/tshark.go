@@ -82,6 +82,16 @@ func FindTShark() (string, error) {
 
 // GetTSharkVersion retrieves the version of the TShark executable.
 func GetTSharkVersion(tsharkPath string) (string, error) {
+	// Resolve an empty path via FindTShark, consistent with every other
+	// function in this package that accepts a tsharkPath argument.
+	if tsharkPath == "" {
+		var err error
+		tsharkPath, err = FindTShark()
+		if err != nil {
+			return "", err
+		}
+	}
+
 	cmd := exec.Command(tsharkPath, "-v")
 	output, err := cmd.Output()
 	if err != nil {
