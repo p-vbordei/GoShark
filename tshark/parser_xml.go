@@ -105,9 +105,11 @@ func (p *XMLParser) ConvertPDMLPacket(pdmlPacket *PDMLPacket) (*packet.Packet, e
 	// Convert layers
 	pkt.Layers = make([]packet.Layer, 0, len(pdmlPacket.Layers))
 	for _, pdmlProto := range pdmlPacket.Layers {
-		// "fake-field-wrapper" is a PDML artifact wrapping anonymous fields;
-		// it is not a real protocol layer. pyshark filters these out.
-		if pdmlProto.Name == "fake-field-wrapper" || pdmlProto.Name == "" {
+		// "fake-field-wrapper" wraps anonymous fields and "geninfo" is a
+		// synthetic "General information" pseudo-protocol — neither is a real
+		// on-wire layer, and the JSON output mode emits neither. Drop both so
+		// the JSON and PDML paths yield the same layer set.
+		if pdmlProto.Name == "fake-field-wrapper" || pdmlProto.Name == "geninfo" || pdmlProto.Name == "" {
 			continue
 		}
 		layer, err := p.convertPDMLProto(&pdmlProto)
@@ -223,6 +225,11 @@ func (p *XMLParser) convertPDMLField(layer *packet.Layer, pdmlField *PDMLField) 
 func (p *XMLParser) extractFrameInfo(pkt *packet.Packet, pdmlProto *PDMLProto) {
 	for _, pdmlField := range pdmlProto.Fields {
 		switch pdmlField.Name {
+		case "frame.number":
+			// PDML <packet> carries no num attribute; take it from the field.
+			if pkt.FrameNumber == "" {
+				pkt.FrameNumber = pdmlField.Show
+			}
 		case "frame.time_epoch":
 			pkt.FrameTimeEpoch = pdmlField.Show
 		case "frame.time":
