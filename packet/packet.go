@@ -378,18 +378,36 @@ func (p *Packet) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// SniffTime returns the packet's capture time as a time.Time object.
+// SniffTimestamp returns the raw capture timestamp string (frame.time_epoch).
+func (p *Packet) SniffTimestamp() string {
+	return p.FrameTimeEpoch
+}
+
+// SniffTime returns the packet's capture time as a time.Time object. It accepts
+// either a float epoch (frame.time_epoch's usual form) or an ISO-8601 timestamp
+// (tshark renders absolute-time fields per the Wireshark time-format preference),
+// falling back to frame.time.
 func (p *Packet) SniffTime() (time.Time, error) {
-	if p.FrameTimeEpoch == "" {
-		return time.Time{}, fmt.Errorf("sniff time epoch not available")
+	s := p.FrameTimeEpoch
+	if s == "" {
+		s = p.FrameTime
 	}
-	epoch, err := strconv.ParseFloat(p.FrameTimeEpoch, 64)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("failed to parse sniff time epoch: %w", err)
+	if s == "" {
+		return time.Time{}, fmt.Errorf("sniff time not available")
 	}
-	sec := int64(epoch)
-	nsec := int64((epoch - float64(sec)) * 1e9)
-	return time.Unix(sec, nsec), nil
+
+	if epoch, err := strconv.ParseFloat(s, 64); err == nil {
+		sec := int64(epoch)
+		nsec := int64((epoch - float64(sec)) * 1e9)
+		return time.Unix(sec, nsec), nil
+	}
+
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05.999999999"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("failed to parse sniff time %q", s)
 }
 
 // GetLayer retrieves a layer by its name (case-insensitive).

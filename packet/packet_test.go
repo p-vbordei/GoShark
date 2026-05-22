@@ -53,3 +53,30 @@ func TestPacketJSONLayerOrderAndFrame(t *testing.T) {
 		t.Errorf("TransportLayer = %q, want %q", p.TransportLayer(), "tcp")
 	}
 }
+
+// TestSniffTimeFormats verifies SniffTime accepts both a float epoch and an
+// ISO-8601 timestamp (tshark renders absolute-time fields per the time-format
+// preference, so frame.time_epoch is not always a float).
+func TestSniffTimeFormats(t *testing.T) {
+	pf := &Packet{FrameTimeEpoch: "1747997000.123456"}
+	tf, err := pf.SniffTime()
+	if err != nil {
+		t.Fatalf("SniffTime(float): %v", err)
+	}
+	if tf.Unix() != 1747997000 {
+		t.Errorf("SniffTime(float).Unix() = %d, want 1747997000", tf.Unix())
+	}
+
+	pi := &Packet{FrameTimeEpoch: "2025-05-23T10:43:13.726858000Z"}
+	ti, err := pi.SniffTime()
+	if err != nil {
+		t.Fatalf("SniffTime(iso): %v", err)
+	}
+	if ti.UTC().Year() != 2025 {
+		t.Errorf("SniffTime(iso).Year() = %d, want 2025", ti.UTC().Year())
+	}
+
+	if pf.SniffTimestamp() != "1747997000.123456" {
+		t.Errorf("SniffTimestamp() = %q", pf.SniffTimestamp())
+	}
+}
