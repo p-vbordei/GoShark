@@ -9,6 +9,8 @@ import (
 )
 
 func TestJSONParser(t *testing.T) {
+	// Real tshark -T json output: field values are plain strings, and the
+	// layers object is ordered (frame first).
 	jsonData := `[
 		{
 			"_index": "packets-2021-05-03",
@@ -17,9 +19,9 @@ func TestJSONParser(t *testing.T) {
 			"_source": {
 				"layers": {
 					"frame": {
-						"frame.number": [{"value": "1"}],
-						"frame.len": [{"value": "60"}],
-						"frame.time": [{"value": "May 3, 2021 18:40:00.000000000 UTC"}]
+						"frame.number": "1",
+						"frame.len": "60",
+						"frame.time": "May 3, 2021 18:40:00.000000000 UTC"
 					},
 					"ip": {
 						"ip.src": "192.168.1.1",
