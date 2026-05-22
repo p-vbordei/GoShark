@@ -54,3 +54,29 @@ func TestCaptureTSharkArgs(t *testing.T) {
 	}
 	assert.True(t, found, "Arguments should include display filter option")
 }
+
+func TestRemoteCaptureOptions(t *testing.T) {
+	rc, err := NewRemoteCapture("192.168.1.100", "eth1", WithRemotePort(3333))
+	assert.NoError(t, err)
+	assert.Equal(t, "192.168.1.100", rc.RemoteHost)
+	assert.Equal(t, "eth1", rc.RemoteInterface)
+	assert.Equal(t, 3333, rc.RemotePort)
+	assert.Equal(t, []string{"rpcap://192.168.1.100:3333/eth1"}, rc.Interfaces)
+
+	// Verify Start reconstructs if interfaces are wiped out
+	rc.Interfaces = nil
+	_, _, err = rc.Start()
+	// It's expected to error if tshark path isn't valid or interface doesn't exist, but reconstruction must occur.
+	assert.Equal(t, []string{"rpcap://192.168.1.100:3333/eth1"}, rc.Interfaces)
+
+	assert.Contains(t, rc.String(), "host=192.168.1.100")
+	assert.Contains(t, rc.String(), "port=3333")
+}
+
+func TestLiveRingCaptureOptions(t *testing.T) {
+	lrc, err := NewLiveRingCapture([]string{"eth0"}, WithRingFileSize(2048), WithNumRingFiles(5), WithRingFileName("/tmp/test.pcap"))
+	assert.NoError(t, err)
+	assert.Equal(t, 2048, lrc.RingFileSize)
+	assert.Equal(t, 5, lrc.NumRingFiles)
+	assert.Equal(t, "/tmp/test.pcap", lrc.RingFileName)
+}

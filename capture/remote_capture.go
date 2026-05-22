@@ -38,6 +38,10 @@ func NewRemoteCapture(remoteHost, remoteInterface string, options ...Option) (*R
 		RemotePort:      remotePort,
 	}
 
+	for _, option := range options {
+		option(rc)
+	}
+
 	return rc, nil
 }
 
