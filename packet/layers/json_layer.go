@@ -4,22 +4,9 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"GoShark/packet"
 )
-
-// SanitizeFieldName is a temporary placeholder for the actual function
-// In a real module, this would be imported from the packet package
-func SanitizeFieldName(fieldName string, prefix string) string {
-	// Remove the prefix if it exists
-	fieldName = strings.TrimPrefix(fieldName, prefix)
-	// Replace dots and dashes with underscores
-	return strings.ReplaceAll(strings.ReplaceAll(fieldName, ".", "_"), "-", "_")
-}
-
-// Colored is a temporary placeholder for the actual function
-// In a real module, this would be imported from the packet package
-func Colored(text string, color string, bold bool) string {
-	return text
-}
 
 // JSONLayer represents a layer parsed from JSON output
 type JSONLayer struct {
@@ -115,7 +102,11 @@ func (l *JSONLayer) FieldNames() []string {
 	// Add fields that start with the full name
 	for fieldName := range l.Fields {
 		if strings.HasPrefix(fieldName, l.FullName) {
-			sanitizedName := SanitizeFieldName(fieldName, l.FullName)
+			prefix := l.FullName
+			if !strings.HasSuffix(prefix, ".") && strings.HasPrefix(fieldName, l.FullName+".") {
+				prefix = l.FullName + "."
+			}
+			sanitizedName := packet.SanitizeFieldName(fieldName, prefix)
 			if !seenNames[sanitizedName] {
 				names = append(names, sanitizedName)
 				seenNames[sanitizedName] = true
@@ -128,7 +119,7 @@ func (l *JSONLayer) FieldNames() []string {
 		if strings.Contains(name, ".") {
 			parts := strings.Split(name, ".")
 			if len(parts) > 1 {
-				sanitizedName := SanitizeFieldName(parts[len(parts)-1], "")
+				sanitizedName := packet.SanitizeFieldName(parts[len(parts)-1], "")
 				if !seenNames[sanitizedName] {
 					names = append(names, sanitizedName)
 					seenNames[sanitizedName] = true
@@ -176,10 +167,10 @@ func (l *JSONLayer) prettyPrintLayerFields(writer io.Writer) {
 			parts := strings.SplitN(fieldLine, ":", 2)
 			fieldName := parts[0]
 			fieldValue := parts[1]
-			fmt.Fprint(writer, Colored(fieldName+":", "green", true))
+			fmt.Fprint(writer, packet.Colored(fieldName+":", "green", true))
 			fmt.Fprint(writer, fieldValue)
 		} else {
-			fmt.Fprint(writer, Colored(fieldLine, "", true))
+			fmt.Fprint(writer, packet.Colored(fieldLine, "", true))
 		}
 	}
 }
@@ -250,22 +241,16 @@ func (l *JSONLayer) getInternalFieldByName(name string) interface{} {
 
 	// Try case-insensitive match
 	for fieldName, value := range l.Fields {
-		if strings.EqualFold(sanitizeFieldName(fieldName, l.FullName), name) {
+		prefix := l.FullName
+		if !strings.HasSuffix(prefix, ".") && strings.HasPrefix(fieldName, l.FullName+".") {
+			prefix = l.FullName + "."
+		}
+		if strings.EqualFold(packet.SanitizeFieldName(fieldName, prefix), name) {
 			return value
 		}
 	}
 
 	return nil
-}
-
-// sanitizeFieldName sanitizes a field name for consistent comparison
-func sanitizeFieldName(fieldName, layerName string) string {
-	// Remove the layer name prefix if present
-	prefix := layerName + "."
-	if strings.HasPrefix(fieldName, prefix) {
-		return fieldName[len(prefix):]
-	}
-	return fieldName
 }
 
 // makeWrappedField creates a wrapped field

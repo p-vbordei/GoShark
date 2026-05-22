@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"GoShark/packet"
+	"GoShark/packet/layers"
 )
 
 // XMLParser handles parsing of TShark PDML (XML) output.
@@ -83,7 +84,7 @@ func (p *XMLParser) ParsePackets(r io.Reader) ([]*packet.Packet, error) {
 	// Convert PDML packets to Packet objects
 	packets := make([]*packet.Packet, 0, len(pdml.Packets))
 	for _, pdmlPacket := range pdml.Packets {
-		pkt, err := p.convertPDMLPacket(&pdmlPacket)
+		pkt, err := p.ConvertPDMLPacket(&pdmlPacket)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert PDML packet: %w", err)
 		}
@@ -93,8 +94,8 @@ func (p *XMLParser) ParsePackets(r io.Reader) ([]*packet.Packet, error) {
 	return packets, nil
 }
 
-// convertPDMLPacket converts a PDMLPacket to a Packet.
-func (p *XMLParser) convertPDMLPacket(pdmlPacket *PDMLPacket) (*packet.Packet, error) {
+// ConvertPDMLPacket converts a PDMLPacket to a Packet.
+func (p *XMLParser) ConvertPDMLPacket(pdmlPacket *PDMLPacket) (*packet.Packet, error) {
 	// Create a new Packet
 	pkt := &packet.Packet{}
 
@@ -132,7 +133,32 @@ func (p *XMLParser) convertPDMLProto(pdmlProto *PDMLProto) (*packet.Layer, error
 		p.convertPDMLField(layer, &pdmlField)
 	}
 
+	// Convert and populate concrete XMLLayer
+	xmlLayer := layers.NewXMLLayer(pdmlProto.Name, false)
+	for i := range pdmlProto.Fields {
+		addFieldsToXMLLayer(xmlLayer, &pdmlProto.Fields[i])
+	}
+	layer.XMLLayer = xmlLayer
+
 	return layer, nil
+}
+
+func addFieldsToXMLLayer(xmlLayer *layers.XMLLayer, field *PDMLField) {
+	lf := packet.NewLayerField(
+		field.Name,
+		field.Showname,
+		field.Value,
+		field.Show,
+		"no",
+		field.Pos,
+		field.Size,
+		"",
+	)
+	xmlLayer.AddField(lf)
+
+	for i := range field.Fields {
+		addFieldsToXMLLayer(xmlLayer, &field.Fields[i])
+	}
 }
 
 // convertPDMLField converts a PDMLField to a field in a Layer.

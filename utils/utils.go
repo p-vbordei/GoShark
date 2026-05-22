@@ -308,12 +308,14 @@ func SplitCommandLine(cmdline string) []string {
 				quote = ""
 			} else {
 				current += string(c)
+				state = "arg"
 			}
 			continue
 		}
 
 		if c == '"' || c == '\'' {
 			quote = string(c)
+			state = "arg"
 			continue
 		}
 

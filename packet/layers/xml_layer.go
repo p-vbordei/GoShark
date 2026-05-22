@@ -4,61 +4,15 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"GoShark/packet"
 )
-
-// LayerFieldsContainer is a temporary placeholder for the actual type
-// In a real module, this would be imported from the packet package
-type LayerFieldsContainer struct {
-	Fields []*LayerField
-}
-
-// LayerField is a temporary placeholder for the actual type
-// In a real module, this would be imported from the packet package
-type LayerField struct {
-	Name     string
-	Showname string
-	RawValue string
-}
-
-// NewLayerFieldsContainer creates a new container with the given main field
-func NewLayerFieldsContainer(mainField *LayerField) *LayerFieldsContainer {
-	return &LayerFieldsContainer{
-		Fields: []*LayerField{mainField},
-	}
-}
-
-// AddField adds a field to the container
-func (c *LayerFieldsContainer) AddField(field *LayerField) {
-	c.Fields = append(c.Fields, field)
-}
-
-// GetMainField returns the main (first) field in the container
-func (c *LayerFieldsContainer) GetMainField() *LayerField {
-	if len(c.Fields) > 0 {
-		return c.Fields[0]
-	}
-	return nil
-}
-
-// GetAllFields returns all fields in the container
-func (c *LayerFieldsContainer) GetAllFields() []*LayerField {
-	return c.Fields
-}
-
-// GetDefaultValue returns the default value of the main field
-func (c *LayerFieldsContainer) GetDefaultValue() string {
-	mainField := c.GetMainField()
-	if mainField != nil {
-		return mainField.RawValue
-	}
-	return ""
-}
 
 // XMLLayer represents a layer parsed from XML output
 type XMLLayer struct {
 	*BaseLayer
 	RawMode   bool
-	AllFields map[string]*LayerFieldsContainer
+	AllFields map[string]*packet.LayerFieldsContainer
 }
 
 // NewXMLLayer creates a new XMLLayer from XML data
@@ -67,12 +21,12 @@ func NewXMLLayer(name string, rawMode bool) *XMLLayer {
 	return &XMLLayer{
 		BaseLayer: baseLayer,
 		RawMode:   rawMode,
-		AllFields: make(map[string]*LayerFieldsContainer),
+		AllFields: make(map[string]*packet.LayerFieldsContainer),
 	}
 }
 
 // AddField adds a field to the layer
-func (l *XMLLayer) AddField(field *LayerField) {
+func (l *XMLLayer) AddField(field *packet.LayerField) {
 	if field == nil {
 		return
 	}
@@ -82,7 +36,7 @@ func (l *XMLLayer) AddField(field *LayerField) {
 		container.AddField(field)
 	} else {
 		// Create a new container for this field
-		l.AllFields[field.Name] = NewLayerFieldsContainer(field)
+		l.AllFields[field.Name] = packet.NewLayerFieldsContainer(field)
 	}
 }
 
@@ -119,7 +73,7 @@ func (l *XMLLayer) GetFieldValue(name string, raw bool) interface{} {
 
 	if raw {
 		switch f := field.(type) {
-		case *LayerFieldsContainer:
+		case *packet.LayerFieldsContainer:
 			mainField := f.GetMainField()
 			if mainField != nil {
 				return mainField.RawValue
@@ -158,10 +112,10 @@ func (l *XMLLayer) prettyPrintLayerFields(writer io.Writer) {
 			fieldName := parts[0]
 			fieldValue := parts[1]
 			// Use simple formatting instead of packet.Colored
-			fmt.Fprintf(writer, "\033[32;1m%s:\033[0m%s", fieldName, fieldValue)
+			fmt.Fprintf(writer, " \033[32;1m%s: \033[0m%s", fieldName, fieldValue)
 		} else {
 			// Use simple formatting instead of packet.Colored
-			fmt.Fprintf(writer, "\033[1m%s\033[0m", fieldLine)
+			fmt.Fprintf(writer, " \033[1m%s \033[0m", fieldLine)
 		}
 	}
 }
@@ -177,7 +131,7 @@ func (l *XMLLayer) getAllFieldLines() []string {
 		field := l.GetField(fieldName)
 		if field != nil {
 			switch f := field.(type) {
-			case *LayerFieldsContainer:
+			case *packet.LayerFieldsContainer:
 				for _, subField := range f.GetAllFields() {
 					lines = append(lines, fmt.Sprintf("\t%s: %s\n", subField.Name, subField.RawValue))
 				}

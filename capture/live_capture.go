@@ -1,11 +1,13 @@
 package capture
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os/exec"
 	"strings"
 
+	"GoShark/packet"
 	"GoShark/tshark"
 )
 
@@ -198,4 +200,20 @@ func (lc *LiveCapture) getDumpcapParameters() []string {
 	params = append(params, "-w", "-")
 
 	return params
+}
+
+// SniffContinuously sniffs packets from the live capture and streams them on a channel.
+func (lc *LiveCapture) SniffContinuously(ctx context.Context) (<-chan *packet.Packet, error) {
+	stdout, stderr, err := lc.Start()
+	if err != nil {
+		return nil, err
+	}
+	return lc.sniffStream(ctx, stdout, stderr)
+}
+
+// ApplyOnPackets applies the callback to all captured packets.
+func (lc *LiveCapture) ApplyOnPackets(callback func(*packet.Packet) bool, ctx context.Context) error {
+	return lc.Capture.ApplyOnPackets(callback, ctx, func() (io.ReadCloser, io.ReadCloser, error) {
+		return lc.Start()
+	})
 }

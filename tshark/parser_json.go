@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"GoShark/packet"
+	"GoShark/packet/layers"
 )
 
 // JSONParser handles parsing of TShark JSON output.
@@ -35,6 +36,12 @@ func WithIncludeRaw(includeRaw bool) func(*JSONParser) {
 	}
 }
 
+func populateJSONLayers(pkt *packet.Packet) {
+	for i := range pkt.Layers {
+		pkt.Layers[i].JSONLayer = layers.NewJSONLayer(pkt.Layers[i].Name, pkt.Layers[i].Fields, pkt.Layers[i].Name, false)
+	}
+}
+
 // ParsePackets reads TShark JSON output from the provided reader and returns a slice of Packet objects.
 func (p *JSONParser) ParsePackets(r io.Reader) ([]*packet.Packet, error) {
 	// Create a JSON decoder for streaming JSON parsing
@@ -60,6 +67,7 @@ func (p *JSONParser) ParsePackets(r io.Reader) ([]*packet.Packet, error) {
 		if err := decoder.Decode(&pkt); err != nil {
 			return nil, fmt.Errorf("failed to decode packet: %w", err)
 		}
+		populateJSONLayers(&pkt)
 		packets = append(packets, &pkt)
 	}
 
@@ -98,6 +106,7 @@ func (p *JSONParser) ParseSinglePacket(jsonData string) (*packet.Packet, error) 
 	if err := json.Unmarshal([]byte(jsonData), &pkt); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal packet: %w", err)
 	}
+	populateJSONLayers(&pkt)
 
 	return &pkt, nil
 }
@@ -113,6 +122,7 @@ func (p *JSONParser) ParseLayerJSON(layerJSON json.RawMessage, layerName string)
 		Name:   layerName,
 		Fields: fields,
 	}
+	layer.JSONLayer = layers.NewJSONLayer(layerName, fields, layerName, false)
 
 	return layer, nil
 }
@@ -128,6 +138,7 @@ func (p *JSONParser) HandleNestedLayers(parentLayer *packet.Layer) error {
 				Name:   fmt.Sprintf("%s.%s", parentLayer.Name, fieldName),
 				Fields: nestedMap,
 			}
+			nestedLayer.JSONLayer = layers.NewJSONLayer(nestedLayer.Name, nestedMap, nestedLayer.Name, false)
 
 			// Recursively handle any further nesting
 			if err := p.HandleNestedLayers(nestedLayer); err != nil {

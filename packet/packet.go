@@ -28,11 +28,14 @@ type Field struct {
 
 // Layer represents a generic protocol layer with dynamic fields.
 type Layer struct {
-	Name   string                 `json:"-"` // The name of the layer (e.g., "eth", "ip")
-	Fields map[string]interface{} `json:",inline"` // All fields of the layer
-	Offsets map[string]*FieldOffset `json:"-"` // Field offsets for raw data access
-	Pos    int                    `json:"-"` // Position of this layer in the packet (byte offset)
-	Len    int                    `json:"-"` // Length of this layer in bytes
+	Name      string                 `json:"-"` // The name of the layer (e.g., "eth", "ip")
+	Fields    map[string]interface{} `json:",inline"` // All fields of the layer
+	Offsets   map[string]*FieldOffset `json:"-"` // Field offsets for raw data access
+	Pos       int                    `json:"-"` // Position of this layer in the packet (byte offset)
+	Len       int                    `json:"-"` // Length of this layer in bytes
+	JSONLayer interface{}            `json:"-"` // Concrete layers.JSONLayer representation
+	XMLLayer  interface{}            `json:"-"` // Concrete layers.XMLLayer representation
+	EKLayer   interface{}            `json:"-"` // Concrete layers.EKLayer representation
 }
 
 // GetField retrieves a field's value from the layer by its name.

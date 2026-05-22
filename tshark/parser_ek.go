@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
 	"GoShark/packet"
+	"GoShark/packet/layers"
 )
 
 // EKParser handles parsing of TShark Elastic Common Schema (EK) output.
@@ -97,22 +99,22 @@ func (p *EKParser) convertEKDocument(doc *EKDocument) (*packet.Packet, error) {
 		}
 		
 		// Extract frame number
-		if frameNum, ok := frameLayer["frame.number"].(string); ok {
+		if frameNum := getStringOrNumberValue(frameLayer, "frame_number", "frame.number"); frameNum != "" {
 			pkt.FrameNumber = frameNum
 		}
 		
 		// Extract frame length
-		if frameLen, ok := frameLayer["frame.len"].(string); ok {
+		if frameLen := getStringOrNumberValue(frameLayer, "frame_len", "frame.len"); frameLen != "" {
 			pkt.FrameLen = frameLen
 		}
 		
 		// Extract capture length
-		if frameCapLen, ok := frameLayer["frame.cap_len"].(string); ok {
+		if frameCapLen := getStringOrNumberValue(frameLayer, "frame_cap_len", "frame.cap_len"); frameCapLen != "" {
 			pkt.FrameCapLen = frameCapLen
 		}
 		
 		// Extract epoch time
-		if frameTimeEpoch, ok := frameLayer["frame.time_epoch"].(string); ok {
+		if frameTimeEpoch := getStringOrNumberValue(frameLayer, "frame_time_epoch", "frame.time_epoch"); frameTimeEpoch != "" {
 			pkt.FrameTimeEpoch = frameTimeEpoch
 		}
 	}
@@ -162,6 +164,9 @@ func (p *EKParser) convertEKLayer(layerName string, layerData json.RawMessage) (
 		}
 	}
 
+	// Instantiate and assign EKLayer
+	layer.EKLayer = layers.NewEKLayer(layerName, fields)
+
 	return layer, nil
 }
 
@@ -188,3 +193,25 @@ func ParseTSharkEKString(jsonData string, includeRaw bool) ([]*packet.Packet, er
 	parser := NewEKParser(WithEKIncludeRaw(includeRaw))
 	return parser.ParsePackets(strings.NewReader(jsonData))
 }
+
+func getStringOrNumberValue(m map[string]interface{}, key1, key2 string) string {
+	var val interface{}
+	var ok bool
+	if val, ok = m[key1]; !ok {
+		if val, ok = m[key2]; !ok {
+			return ""
+		}
+	}
+	switch v := val.(type) {
+	case string:
+		return v
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	}
+	return fmt.Sprintf("%v", val)
+}
+

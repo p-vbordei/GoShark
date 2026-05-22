@@ -1,10 +1,13 @@
 package capture
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
+
+	"GoShark/packet"
+	"GoShark/tshark"
 )
 
 // FileCapture represents a packet capture from a file.
@@ -37,7 +40,7 @@ func NewFileCapture(filePath string, options ...Option) (*FileCapture, error) {
 }
 
 // Start begins the file capture process.
-func (c *FileCapture) Start() (stdout io.Reader, stderr io.Reader, err error) {
+func (c *FileCapture) Start() (io.ReadCloser, io.ReadCloser, error) {
 	if c.FilePath == "" {
 		return nil, nil, fmt.Errorf("file path cannot be empty for file capture")
 	}
@@ -54,7 +57,10 @@ func (c *FileCapture) Start() (stdout io.Reader, stderr io.Reader, err error) {
 	// Append the common arguments
 	args = append(args, tsharkArgs...)
 
-	cmd := exec.Command("tshark", args...)
+	cmd, err := tshark.RunTSharkCommand(c.TSharkPath, args...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to run tshark command: %w", err)
+	}
 	c.cmd = cmd
 
 	stdoutPipe, err := cmd.StdoutPipe()
@@ -73,4 +79,20 @@ func (c *FileCapture) Start() (stdout io.Reader, stderr io.Reader, err error) {
 
 	// No need to wait here, main.go will call c.Wait()
 	return stdoutPipe, stderrPipe, nil
+}
+
+// SniffContinuously sniffs packets from the file capture and streams them on a channel.
+func (c *FileCapture) SniffContinuously(ctx context.Context) (<-chan *packet.Packet, error) {
+	stdout, stderr, err := c.Start()
+	if err != nil {
+		return nil, err
+	}
+	return c.sniffStream(ctx, stdout, stderr)
+}
+
+// ApplyOnPackets applies the callback to all captured packets.
+func (c *FileCapture) ApplyOnPackets(callback func(*packet.Packet) bool, ctx context.Context) error {
+	return c.Capture.ApplyOnPackets(callback, ctx, func() (io.ReadCloser, io.ReadCloser, error) {
+		return c.Start()
+	})
 }

@@ -4,13 +4,9 @@ import (
 	"fmt"
 	"io"
 	"strings"
-)
 
-// Temporary import fix - in a real module these would be proper imports
-// These are placeholders for the actual imports that would be used in a Go module
-type fieldMapping interface {
-	CastFieldValue(layerName, fieldName string, value interface{}) interface{}
-}
+	"GoShark/tshark/ek_field_mapping"
+)
 
 // EKLayer represents a layer parsed from Elastic Common Schema output
 type EKLayer struct {
@@ -123,10 +119,7 @@ func (l *EKLayer) prettyPrintLayerFields(writer io.Writer) {
 // getFieldValue gets the field value, optionally casting it using the field mapping
 func (l *EKLayer) getFieldValue(fullFieldName string) interface{} {
 	fieldValue := l.FieldsDict[fullFieldName]
-	// In a real implementation, this would use the proper import
-	// return ek_field_mapping.CastFieldValue(l.LayerName, fullFieldName, fieldValue)
-	// For now, just return the value as is
-	return fieldValue
+	return ek_field_mapping.CastFieldValue(l.LayerName, fullFieldName, fieldValue)
 }
 
 // getNestedField gets a field that is directly on the layer

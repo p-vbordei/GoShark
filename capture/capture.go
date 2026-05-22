@@ -1,11 +1,16 @@
 package capture
 
 import (
+	"context"
+	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"os/exec"
 	"strconv"
 
+	"GoShark/packet"
+	"GoShark/packet/layers"
 	"GoShark/tshark"
 )
 
@@ -314,4 +319,129 @@ func (c *Capture) Wait() error {
 		return fmt.Errorf("tshark command not started")
 	}
 	return c.cmd.Wait()
+}
+
+// sniffStream reads packets from stdout in a streaming fashion.
+func (c *Capture) sniffStream(ctx context.Context, stdout io.ReadCloser, stderr io.ReadCloser) (<-chan *packet.Packet, error) {
+	outChan := make(chan *packet.Packet, 100)
+	done := make(chan struct{})
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			stdout.Close()
+			stderr.Close()
+		case <-done:
+		}
+	}()
+
+	go func() {
+		defer stdout.Close()
+		defer stderr.Close()
+		defer close(outChan)
+		defer close(done)
+
+		if c.UseJSON {
+			decoder := json.NewDecoder(stdout)
+			// Read the first token which must be '['
+			t, err := decoder.Token()
+			if err != nil {
+				return
+			}
+			delim, ok := t.(json.Delim)
+			if !ok || delim != '[' {
+				return
+			}
+
+			// Read each packet object as it becomes available
+			for decoder.More() {
+				// Check for context cancellation
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				var pkt packet.Packet
+				if err := decoder.Decode(&pkt); err != nil {
+					return
+				}
+				// Populate JSON layers
+				for i := range pkt.Layers {
+					pkt.Layers[i].JSONLayer = layers.NewJSONLayer(pkt.Layers[i].Name, pkt.Layers[i].Fields, pkt.Layers[i].Name, false)
+				}
+
+				select {
+				case <-ctx.Done():
+					return
+				case outChan <- &pkt:
+				}
+			}
+		} else {
+			// XML / PDML stream parsing
+			decoder := xml.NewDecoder(stdout)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				t, err := decoder.Token()
+				if err != nil {
+					return
+				}
+
+				if se, ok := t.(xml.StartElement); ok && se.Name.Local == "packet" {
+					var pdmlPacket tshark.PDMLPacket
+					if err := decoder.DecodeElement(&pdmlPacket, &se); err != nil {
+						return
+					}
+
+					// Convert PDMLPacket to packet.Packet using XMLParser's logic
+					parser := tshark.NewXMLParser(tshark.WithXMLIncludeRaw(c.IncludeRaw))
+					pkt, err := parser.ConvertPDMLPacket(&pdmlPacket)
+					if err == nil {
+						select {
+						case <-ctx.Done():
+							return
+						case outChan <- pkt:
+						}
+					}
+				}
+			}
+		}
+	}()
+
+	return outChan, nil
+}
+
+// ApplyOnPackets applies the callback to all captured packets.
+// If the callback returns true, sniffing is stopped early.
+func (c *Capture) ApplyOnPackets(callback func(*packet.Packet) bool, ctx context.Context, startFunc func() (io.ReadCloser, io.ReadCloser, error)) error {
+	stdout, stderr, err := startFunc()
+	if err != nil {
+		return err
+	}
+
+	packets, err := c.sniffStream(ctx, stdout, stderr)
+	if err != nil {
+		return err
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			c.Stop()
+			return ctx.Err()
+		case pkt, ok := <-packets:
+			if !ok {
+				return nil
+			}
+			if callback(pkt) {
+				c.Stop()
+				return nil
+			}
+		}
+	}
 }
