@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+
+	"GoShark/tshark"
 )
 
 // PipeCapture represents a capture that reads packets from a pipe or reader.
@@ -13,7 +15,7 @@ type PipeCapture struct {
 }
 
 // NewPipeCapture creates a new PipeCapture instance that reads from the given pipe.
-func NewPipeCapture(pipe io.Reader, options ...func(*Capture)) *PipeCapture {
+func NewPipeCapture(pipe io.Reader, options ...Option) *PipeCapture {
 	c := NewCapture(options...)
 
 	return &PipeCapture{
@@ -73,13 +75,7 @@ func (pc *PipeCapture) getTSharkPath() (string, error) {
 		return pc.TSharkPath, nil
 	}
 
-	// Find tshark in PATH
-	path, err := exec.LookPath("tshark")
-	if err != nil {
-		return "", fmt.Errorf("tshark not found in PATH: %w", err)
-	}
-
-	return path, nil
+	return tshark.FindTShark()
 }
 
 // Close closes the pipe if it implements io.Closer.

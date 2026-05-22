@@ -1,27 +1,23 @@
-package capture_test
+package capture
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
-	"GoShark/capture"
-	"GoShark/tests"
 )
 
 func TestCaptureOptions(t *testing.T) {
 	// Test default options
-	cap := capture.NewCapture()
+	cap := NewCapture()
 	assert.Equal(t, "", cap.OutputFile, "Default output file should be empty")
 	assert.Equal(t, "", cap.DisplayFilter, "Default display filter should be empty")
 	assert.Equal(t, "", cap.CaptureFilter, "Default capture filter should be empty")
 	assert.True(t, cap.UseJSON, "Default UseJSON should be true")
 
 	// Test with options
-	cap = capture.NewCapture(
-		capture.WithOutputFile("test.pcap"),
-		capture.WithDisplayFilter("tcp"),
+	cap = NewCapture(
+		WithOutputFile("test.pcap"),
+		WithDisplayFilter("tcp"),
 	)
 
 	assert.Equal(t, "test.pcap", cap.OutputFile, "Output file should be set")
@@ -30,25 +26,15 @@ func TestCaptureOptions(t *testing.T) {
 
 func TestCaptureTSharkArgs(t *testing.T) {
 	// Create a capture with options
-	cap := capture.NewCapture(
-		capture.WithOutputFile("test.pcap"),
-		capture.WithDisplayFilter("tcp"),
-		capture.WithTSharkPath("/usr/bin/tshark"),
+	cap := NewCapture(
+		WithOutputFile("test.pcap"),
+		WithDisplayFilter("tcp"),
+		WithTSharkPath("/usr/bin/tshark"),
 	)
 
-	// Test getTSharkArgs (we need to access it through reflection since it's private)
-	r := reflect.ValueOf(cap)
-	m := r.MethodByName("getTSharkArgs")
-	if !m.IsValid() {
-		t.Skip("getTSharkArgs method not found, skipping test")
-	}
+	args, err := cap.getTSharkArgs()
+	assert.NoError(t, err)
 
-	results := m.Call([]reflect.Value{})
-	if len(results) != 2 {
-		t.Fatal("Expected 2 return values from getTSharkArgs")
-	}
-
-	args := results[0].Interface().([]string)
 	// Check that arguments include the expected options
 	found := false
 	for i, arg := range args {
@@ -67,10 +53,4 @@ func TestCaptureTSharkArgs(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "Arguments should include display filter option")
-}
-
-func TestCaptureUsesTests(t *testing.T) {
-	// This test is just to make sure we're using the tests package
-	path := tests.TestDataPath()
-	assert.NotEmpty(t, path, "TestDataPath should return a non-empty path")
 }

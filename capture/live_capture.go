@@ -18,16 +18,20 @@ type LiveCapture struct {
 
 // NewLiveCapture creates a new LiveCapture instance with the specified interfaces.
 // If no interfaces are provided, all available interfaces will be used.
-func NewLiveCapture(interfaces []string, options ...func(*Capture)) (*LiveCapture, error) {
-	c := NewCapture(options...)
-
+func NewLiveCapture(interfaces []string, options ...Option) (*LiveCapture, error) {
 	lc := &LiveCapture{
-		Capture: c,
+		Capture: &Capture{
+			UseJSON: true,
+		},
+	}
+
+	for _, option := range options {
+		option(lc)
 	}
 
 	// If no interfaces provided, get all available interfaces
 	if len(interfaces) == 0 {
-		allInterfaces, err := tshark.GetTSharkInterfaces(c.TSharkPath)
+		allInterfaces, err := tshark.GetTSharkInterfaces(lc.TSharkPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get interfaces: %w", err)
 		}
@@ -40,9 +44,15 @@ func NewLiveCapture(interfaces []string, options ...func(*Capture)) (*LiveCaptur
 }
 
 // WithBPFFilter sets the BPF filter for the live capture.
-func WithBPFFilter(filter string) func(*LiveCapture) {
-	return func(lc *LiveCapture) {
-		lc.BPFFilter = filter
+func WithBPFFilter(filter string) Option {
+	return func(v interface{}) {
+		if lc, ok := v.(*LiveCapture); ok {
+			lc.BPFFilter = filter
+		} else if rc, ok := v.(*RemoteCapture); ok && rc.LiveCapture != nil {
+			rc.LiveCapture.BPFFilter = filter
+		} else if lrc, ok := v.(*LiveRingCapture); ok && lrc.LiveCapture != nil {
+			lrc.LiveCapture.BPFFilter = filter
+		}
 	}
 }
 

@@ -29,8 +29,35 @@ type Capture struct {
 	cmd *exec.Cmd
 }
 
+// Option is a functional option for configuring captures.
+type Option func(interface{})
+
+// getCapture extracts the base Capture struct pointer from any capture type.
+func getCapture(v interface{}) *Capture {
+	if c, ok := v.(*Capture); ok {
+		return c
+	}
+	switch cap := v.(type) {
+	case *FileCapture:
+		return &cap.Capture
+	case *LiveCapture:
+		return cap.Capture
+	case *RemoteCapture:
+		if cap.LiveCapture != nil {
+			return cap.LiveCapture.Capture
+		}
+	case *LiveRingCapture:
+		if cap.LiveCapture != nil {
+			return cap.LiveCapture.Capture
+		}
+	case *InMemCapture:
+		return &cap.Capture
+	}
+	return nil
+}
+
 // NewCapture creates a new base Capture object.
-func NewCapture(options ...func(*Capture)) *Capture {
+func NewCapture(options ...Option) *Capture {
 	c := &Capture{
 		UseJSON: true, // Default to JSON output for easier parsing
 	}
@@ -43,103 +70,129 @@ func NewCapture(options ...func(*Capture)) *Capture {
 
 // WithDisplayFilter sets the Wireshark display filter for the capture (e.g., "http.request").
 // Corresponds to tshark's -Y flag.
-func WithDisplayFilter(filter string) func(*Capture) { 
-	return func(c *Capture) {
-		c.DisplayFilter = filter
+func WithDisplayFilter(filter string) Option { 
+	return func(v interface{}) {
+		if c := getCapture(v); c != nil {
+			c.DisplayFilter = filter
+		}
 	}
 }
 
 // WithCaptureFilter sets the BPF capture filter for the capture (e.g., "tcp port 80").
 // Corresponds to tshark's -f flag.
-func WithCaptureFilter(filter string) func(*Capture) {
-	return func(c *Capture) {
-		c.CaptureFilter = filter
+func WithCaptureFilter(filter string) Option {
+	return func(v interface{}) {
+		if c := getCapture(v); c != nil {
+			c.CaptureFilter = filter
+		}
 	}
 }
 
 // WithTSharkPath sets the absolute path to the tshark executable.
-func WithTSharkPath(path string) func(*Capture) {
-	return func(c *Capture) {
-		c.TSharkPath = path
+func WithTSharkPath(path string) Option {
+	return func(v interface{}) {
+		if c := getCapture(v); c != nil {
+			c.TSharkPath = path
+		}
 	}
 }
 
 // WithUseJSON sets whether to use JSON output from tshark. If false, PDML is used.
 // Corresponds to tshark's -T json or -T pdml flags.
-func WithUseJSON(useJSON bool) func(*Capture) {
-	return func(c *Capture) {
-		c.UseJSON = useJSON
+func WithUseJSON(useJSON bool) Option {
+	return func(v interface{}) {
+		if c := getCapture(v); c != nil {
+			c.UseJSON = useJSON
+		}
 	}
 }
 
 // WithIncludeRaw sets whether to include raw packet data in the output. (Note: tshark JSON often includes raw data by default).
-func WithIncludeRaw(includeRaw bool) func(*Capture) {
-	return func(c *Capture) {
-		c.IncludeRaw = includeRaw
+func WithIncludeRaw(includeRaw bool) Option {
+	return func(v interface{}) {
+		if c := getCapture(v); c != nil {
+			c.IncludeRaw = includeRaw
+		}
 	}
 }
 
 // WithDecodes adds decode-as rules (e.g., "tcp.port==8888,http").
 // Corresponds to tshark's -d flag.
-func WithDecodes(decodes ...string) func(*Capture) {
-	return func(c *Capture) {
-		c.Decodes = append(c.Decodes, decodes...)
+func WithDecodes(decodes ...string) Option {
+	return func(v interface{}) {
+		if c := getCapture(v); c != nil {
+			c.Decodes = append(c.Decodes, decodes...)
+		}
 	}
 }
 
 // WithEncryptionKeys adds WEP/WPA/WPA2 encryption keys (e.g., "wpa-pwd:password:ssid").
 // Corresponds to tshark's -o wlan.wep_keys flag.
-func WithEncryptionKeys(keys ...string) func(*Capture) {
-	return func(c *Capture) {
-		c.EncryptionKeys = append(c.EncryptionKeys, keys...)
+func WithEncryptionKeys(keys ...string) Option {
+	return func(v interface{}) {
+		if c := getCapture(v); c != nil {
+			c.EncryptionKeys = append(c.EncryptionKeys, keys...)
+		}
 	}
 }
 
 // WithOverridePreferences adds override preferences (e.g., "tcp.port:80").
 // Corresponds to tshark's -o flag.
-func WithOverridePreferences(prefs ...string) func(*Capture) {
-	return func(c *Capture) {
-		c.OverridePreferences = append(c.OverridePreferences, prefs...)
+func WithOverridePreferences(prefs ...string) Option {
+	return func(v interface{}) {
+		if c := getCapture(v); c != nil {
+			c.OverridePreferences = append(c.OverridePreferences, prefs...)
+		}
 	}
 }
 
 // WithPacketCount sets the maximum number of packets to capture. 0 means unlimited.
 // Corresponds to tshark's -c flag.
-func WithPacketCount(count int) func(*Capture) {
-	return func(c *Capture) {
-		c.PacketCount = count
+func WithPacketCount(count int) Option {
+	return func(v interface{}) {
+		if c := getCapture(v); c != nil {
+			c.PacketCount = count
+		}
 	}
 }
 
 // WithSnaplen sets the maximum number of bytes to capture per packet. 0 means unlimited.
 // Corresponds to tshark's -s flag.
-func WithSnaplen(snaplen int) func(*Capture) {
-	return func(c *Capture) {
-		c.Snaplen = snaplen
+func WithSnaplen(snaplen int) Option {
+	return func(v interface{}) {
+		if c := getCapture(v); c != nil {
+			c.Snaplen = snaplen
+		}
 	}
 }
 
 // WithPromiscuous sets whether to capture in promiscuous mode. True by default in tshark.
 // Corresponds to tshark's -p flag (disables promiscuous mode if -p is present).
-func WithPromiscuous(promiscuous bool) func(*Capture) {
-	return func(c *Capture) {
-		c.Promiscuous = promiscuous
+func WithPromiscuous(promiscuous bool) Option {
+	return func(v interface{}) {
+		if c := getCapture(v); c != nil {
+			c.Promiscuous = promiscuous
+		}
 	}
 }
 
 // WithMonitorMode sets whether to capture in monitor mode. Applicable to wireless interfaces.
 // Corresponds to tshark's -I flag.
-func WithMonitorMode(monitorMode bool) func(*Capture) {
-	return func(c *Capture) {
-		c.MonitorMode = monitorMode
+func WithMonitorMode(monitorMode bool) Option {
+	return func(v interface{}) {
+		if c := getCapture(v); c != nil {
+			c.MonitorMode = monitorMode
+		}
 	}
 }
 
 // WithOutputFile sets the output file for the capture.
 // Corresponds to tshark's -w flag.
-func WithOutputFile(outputFile string) func(*Capture) {
-	return func(c *Capture) {
-		c.OutputFile = outputFile
+func WithOutputFile(outputFile string) Option {
+	return func(v interface{}) {
+		if c := getCapture(v); c != nil {
+			c.OutputFile = outputFile
+		}
 	}
 }
 

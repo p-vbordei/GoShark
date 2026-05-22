@@ -147,6 +147,67 @@ type Packet struct {
 	Layers []Layer
 }
 
+func parseInt(v interface{}) (int, bool) {
+	switch val := v.(type) {
+	case int:
+		return val, true
+	case int64:
+		return int(val), true
+	case float64:
+		return int(val), true
+	case string:
+		if i, err := strconv.Atoi(val); err == nil {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func extractHexFromFrameRaw(raw json.RawMessage) (string, error) {
+	// Try array first
+	var arr []interface{}
+	if err := json.Unmarshal(raw, &arr); err == nil && len(arr) > 0 {
+		if hexStr, ok := arr[0].(string); ok {
+			return hexStr, nil
+		}
+	}
+	// Try object with "value"
+	var obj struct {
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(raw, &obj); err == nil && obj.Value != "" {
+		return obj.Value, nil
+	}
+	return "", fmt.Errorf("failed to extract hex from frame_raw")
+}
+
+func extractOffsets(fields map[string]interface{}, offsets map[string]*FieldOffset) {
+	for k, v := range fields {
+		if strings.HasSuffix(k, "_raw") {
+			fieldName := strings.TrimSuffix(k, "_raw")
+			if slice, ok := v.([]interface{}); ok && len(slice) >= 3 {
+				start, ok1 := parseInt(slice[1])
+				length, ok2 := parseInt(slice[2])
+				if ok1 && ok2 {
+					offsets[fieldName] = &FieldOffset{
+						Start:  start,
+						Length: length,
+						Name:   fieldName,
+					}
+				}
+			}
+		} else if nextMap, ok := v.(map[string]interface{}); ok {
+			extractOffsets(nextMap, offsets)
+		} else if sliceOfInterfaces, ok := v.([]interface{}); ok {
+			for _, item := range sliceOfInterfaces {
+				if nextMap, ok := item.(map[string]interface{}); ok {
+					extractOffsets(nextMap, offsets)
+				}
+			}
+		}
+	}
+}
+
 // UnmarshalJSON custom unmarshaler for Packet to handle nested layers and frame info.
 func (p *Packet) UnmarshalJSON(data []byte) error {
 	// Use an auxiliary struct for initial unmarshaling to get _index and _source.layers
@@ -162,8 +223,14 @@ func (p *Packet) UnmarshalJSON(data []byte) error {
 	}
 
 	// Unmarshal _index
-	if err := json.Unmarshal(aux.Index, &p.Index); err != nil {
-		return fmt.Errorf("failed to unmarshal _index: %w", err)
+	var indexStr string
+	if err := json.Unmarshal(aux.Index, &indexStr); err == nil {
+		p.Index.ProtocolID = indexStr
+	} else {
+		// Fallback to struct unmarshaling if it is a JSON object
+		if err := json.Unmarshal(aux.Index, &p.Index); err != nil {
+			return fmt.Errorf("failed to unmarshal _index: %w", err)
+		}
 	}
 
 	// Process layers
@@ -171,13 +238,9 @@ func (p *Packet) UnmarshalJSON(data []byte) error {
 
 	// Check if raw frame data is available
 	if frameRawHex, ok := aux.Source.Layers["frame_raw"]; ok {
-		var frameRawValue struct {
-			Value string `json:"value"`
-		}
-		if err := json.Unmarshal(frameRawHex, &frameRawValue); err == nil && frameRawValue.Value != "" {
-			// Convert hex string to bytes
-			frameRawValue.Value = strings.Replace(frameRawValue.Value, ":", "", -1)
-			rawData, err := hex.DecodeString(frameRawValue.Value)
+		if hexStr, err := extractHexFromFrameRaw(frameRawHex); err == nil {
+			hexStr = strings.ReplaceAll(hexStr, ":", "")
+			rawData, err := hex.DecodeString(hexStr)
 			if err == nil {
 				p.RawData = rawData
 			}
@@ -193,7 +256,7 @@ func (p *Packet) UnmarshalJSON(data []byte) error {
 			FrameTimeEpoch []struct{ Value string } `json:"frame.time_epoch"`
 			FrameTime      []struct{ Value string } `json:"frame.time"`
 			// Field position information
-			FrameOffset    []struct{ 
+			FrameOffset    []struct { 
 				Pos string `json:"pos"` 
 				Showname string `json:"showname"`
 				Size string `json:"size"`
@@ -217,46 +280,38 @@ func (p *Packet) UnmarshalJSON(data []byte) error {
 			if len(frameLayer.FrameTime) > 0 {
 				p.FrameTime = frameLayer.FrameTime[0].Value
 			}
-			
-			// Process field offsets if available
-			if len(frameLayer.FrameOffset) > 0 {
-				offsets := make(map[string]*FieldOffset)
-				for _, offset := range frameLayer.FrameOffset {
-					pos, _ := strconv.Atoi(offset.Pos)
-					size, _ := strconv.Atoi(offset.Size)
-					offsets["frame.offset"] = &FieldOffset{
-						Start: pos,
-						Length: size,
-						Name: "frame.offset",
-						Showname: offset.Showname,
-					}
-				}
-				
-				// Add offsets to the frame layer
-				var frameFields map[string]interface{}
-				json.Unmarshal(frameRaw, &frameFields) // Unmarshal to generic map for Layer.Fields
-				p.Layers = append(p.Layers, Layer{
-					Name: "frame", 
-					Fields: frameFields,
-					Offsets: offsets,
-					Pos: 0, // Frame always starts at position 0
-				})
-				return nil
-			}
 		}
 		
-		// If we didn't already add the frame layer via offsets
-		if len(p.Layers) == 0 {
-			var frameFields map[string]interface{}
-			json.Unmarshal(frameRaw, &frameFields) // Unmarshal to generic map for Layer.Fields
-			p.Layers = append(p.Layers, Layer{Name: "frame", Fields: frameFields})
+		var frameFields map[string]interface{}
+		json.Unmarshal(frameRaw, &frameFields) // Unmarshal to generic map for Layer.Fields
+		
+		layer := Layer{
+			Name: "frame",
+			Fields: frameFields,
+			Offsets: make(map[string]*FieldOffset),
+			Pos: 0,
 		}
+		
+		// Parse frame_raw for frame layer's Pos and Len
+		if rawLayerBytes, ok := aux.Source.Layers["frame_raw"]; ok {
+			var rawArr []interface{}
+			if err := json.Unmarshal(rawLayerBytes, &rawArr); err == nil && len(rawArr) >= 3 {
+				if pos, ok1 := parseInt(rawArr[1]); ok1 {
+					layer.Pos = pos
+				}
+				if length, ok2 := parseInt(rawArr[2]); ok2 {
+					layer.Len = length
+				}
+			}
+		}
+		extractOffsets(layer.Fields, layer.Offsets)
+		p.Layers = append(p.Layers, layer)
 	}
 
 	// Collect other layer names for sorting
 	var layerNames []string
 	for name := range aux.Source.Layers {
-		if name != "frame" { // Skip frame as it's already processed
+		if name != "frame" && !strings.HasSuffix(name, "_raw") { // Skip frame and raw suffix keys
 			layerNames = append(layerNames, name)
 		}
 	}
@@ -264,10 +319,25 @@ func (p *Packet) UnmarshalJSON(data []byte) error {
 
 	for _, layerName := range layerNames {
 		rawLayer := aux.Source.Layers[layerName]
-		layer := Layer{Name: layerName}
+		layer := Layer{Name: layerName, Offsets: make(map[string]*FieldOffset)}
 		if err := json.Unmarshal(rawLayer, &layer.Fields); err != nil {
 			return fmt.Errorf("failed to unmarshal %s layer: %w", layerName, err)
 		}
+		
+		// Parse layerName_raw for layer Pos and Len
+		if rawLayerBytes, ok := aux.Source.Layers[layerName+"_raw"]; ok {
+			var rawArr []interface{}
+			if err := json.Unmarshal(rawLayerBytes, &rawArr); err == nil && len(rawArr) >= 3 {
+				if pos, ok1 := parseInt(rawArr[1]); ok1 {
+					layer.Pos = pos
+				}
+				if length, ok2 := parseInt(rawArr[2]); ok2 {
+					layer.Len = length
+				}
+			}
+		}
+		
+		extractOffsets(layer.Fields, layer.Offsets)
 		p.Layers = append(p.Layers, layer)
 	}
 

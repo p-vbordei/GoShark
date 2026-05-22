@@ -97,3 +97,73 @@ func TestPacketWithLayers(t *testing.T) {
 	tcpRaw := p.GetLayerRawBytes("tcp")
 	assert.Nil(t, tcpRaw, "GetLayerRawBytes should return nil for non-existent layer")
 }
+
+func TestPacketUnmarshalJSONOffsets(t *testing.T) {
+	jsonInput := []byte(`[
+  {
+    "_index": "packets-2025-05-23",
+    "_source": {
+      "layers": {
+        "frame_raw": [
+          "0200000045000073",
+          0,
+          8,
+          0,
+          1
+        ],
+        "frame": {
+          "frame.number": [{"value": "1"}],
+          "frame.len": [{"value": "8"}]
+        },
+        "ip_raw": [
+          "45000073",
+          4,
+          4,
+          0,
+          1
+        ],
+        "ip": {
+          "ip.src_raw": [
+            "45000073",
+            4,
+            4,
+            0,
+            1
+          ],
+          "ip.src": "127.0.0.1"
+        }
+      }
+    }
+  }
+]`)
+
+	p, err := packet.NewPacketFromJSON(jsonInput)
+	assert.NoError(t, err, "NewPacketFromJSON should succeed")
+	assert.NotNil(t, p, "Packet should not be nil")
+
+	// Verify raw packet data was extracted
+	expectedRaw := []byte{0x02, 0x00, 0x00, 0x00, 0x45, 0x00, 0x00, 0x73}
+	assert.Equal(t, expectedRaw, p.RawData, "Packet raw data should match expected bytes")
+
+	// Verify only two layers exist (frame, ip), no _raw layers
+	assert.Equal(t, 2, len(p.Layers), "Packet should have exactly 2 layers")
+	assert.True(t, p.HasLayer("frame"), "Packet should have frame layer")
+	assert.True(t, p.HasLayer("ip"), "Packet should have ip layer")
+
+	frameLayer := p.GetLayer("frame")
+	assert.Equal(t, 0, frameLayer.Pos, "Frame layer position should be 0")
+	assert.Equal(t, 8, frameLayer.Len, "Frame layer length should be 8")
+
+	ipLayer := p.GetLayer("ip")
+	assert.Equal(t, 4, ipLayer.Pos, "IP layer position should be 4")
+	assert.Equal(t, 4, ipLayer.Len, "IP layer length should be 4")
+
+	// Verify layer raw bytes
+	ipRaw := p.GetLayerRawBytes("ip")
+	assert.Equal(t, []byte{0x45, 0x00, 0x00, 0x73}, ipRaw, "IP layer raw bytes should be extracted correctly")
+
+	// Verify field offset and raw bytes
+	ipSrcRaw := p.GetFieldRawBytes("ip", "ip.src")
+	assert.Equal(t, []byte{0x45, 0x00, 0x00, 0x73}, ipSrcRaw, "IP src field raw bytes should be extracted correctly")
+}
+

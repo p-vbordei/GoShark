@@ -59,6 +59,7 @@ func FindTShark() (string, error) {
 			"/usr/bin/tshark",
 			"/usr/local/bin/tshark",
 			"/opt/homebrew/bin/tshark", // For macOS Homebrew
+			"/opt/homebrew/opt/wireshark/bin/tshark", // macOS Homebrew Wireshark package path
 			"/usr/sbin/tshark",
 		)
 	}

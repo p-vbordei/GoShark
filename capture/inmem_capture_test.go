@@ -1,6 +1,7 @@
 package capture
 
 import (
+	"bytes"
 	"testing"
 	"time"
 )
@@ -18,11 +19,16 @@ func TestInMemCapture(t *testing.T) {
 	packetData := []byte{0x45, 0x00, 0x00, 0x3c, 0x7c, 0x3c, 0x40, 0x00, 0x40, 0x06, 0x65, 0x7a, 0xc0, 0xa8, 0x01, 0x02, 0xc0, 0xa8, 0x01, 0x01, 0x04, 0xd2, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x02, 0x20, 0x00, 0xbd, 0x86, 0x00, 0x00}
 	sniffTime := time.Now()
 
-	// Test writing a packet to the PCAP header
-	err := cap.writePacket(packetData, &sniffTime)
-	// This might fail if tshark is not available, so we'll skip if there's an error
+	// Test writing a packet to a buffer
+	var buf bytes.Buffer
+	err := cap.writePacket(&buf, packetData, &sniffTime)
 	if err != nil {
-		t.Skipf("Skipping test due to error writing packet: %v", err)
+		t.Fatalf("Failed to write packet: %v", err)
+	}
+
+	// The packet header is 16 bytes, and the packet data is 40 bytes. Total should be 56 bytes.
+	if buf.Len() != 56 {
+		t.Errorf("Expected buffer length to be 56, got %d", buf.Len())
 	}
 }
 

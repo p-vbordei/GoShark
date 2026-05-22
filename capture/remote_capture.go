@@ -17,7 +17,7 @@ type RemoteCapture struct {
 // NewRemoteCapture creates a new RemoteCapture instance.
 // Note: The remote machine should have rpcapd running in null authentication mode (-n).
 // Be warned that the traffic is unencrypted!
-func NewRemoteCapture(remoteHost, remoteInterface string, options ...func(*Capture)) (*RemoteCapture, error) {
+func NewRemoteCapture(remoteHost, remoteInterface string, options ...Option) (*RemoteCapture, error) {
 	// Default remote port
 	remotePort := 2002
 
@@ -42,13 +42,15 @@ func NewRemoteCapture(remoteHost, remoteInterface string, options ...func(*Captu
 }
 
 // WithRemotePort sets the remote port for the rpcapd service.
-func WithRemotePort(port int) func(*RemoteCapture) {
-	return func(rc *RemoteCapture) {
-		rc.RemotePort = port
+func WithRemotePort(port int) Option {
+	return func(v interface{}) {
+		if rc, ok := v.(*RemoteCapture); ok {
+			rc.RemotePort = port
 
-		// Update the interface string with the new port
-		rpcapInterface := fmt.Sprintf("rpcap://%s:%d/%s", rc.RemoteHost, port, rc.RemoteInterface)
-		rc.Interfaces = []string{rpcapInterface}
+			// Update the interface string with the new port
+			rpcapInterface := fmt.Sprintf("rpcap://%s:%d/%s", rc.RemoteHost, port, rc.RemoteInterface)
+			rc.Interfaces = []string{rpcapInterface}
+		}
 	}
 }
 

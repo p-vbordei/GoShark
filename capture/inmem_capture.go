@@ -5,7 +5,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"os"
 	"time"
+
+	"golang.org/x/mod/semver"
 
 	"GoShark/packet"
 	"GoShark/tshark"
@@ -34,10 +37,11 @@ type InMemCapture struct {
 	}
 	packets         []*packet.Packet
 	pcapHeaderWritten bool
+	outputFile      *os.File
 }
 
 // NewInMemCapture creates a new InMemCapture instance.
-func NewInMemCapture(options ...func(*Capture)) *InMemCapture {
+func NewInMemCapture(options ...Option) *InMemCapture {
 	c := &InMemCapture{
 		Capture: Capture{
 			UseJSON: true,
@@ -48,18 +52,16 @@ func NewInMemCapture(options ...func(*Capture)) *InMemCapture {
 	}
 
 	for _, option := range options {
-		option(&c.Capture)
+		option(c)
 	}
 
 	return c
 }
 
 // WithLinkType sets the link type for the in-memory capture.
-func WithLinkType(linkType LinkType) func(*Capture) {
-	return func(c *Capture) {
-		// This is a bit of a hack, but we need to cast the Capture to an InMemCapture
-		// to set the link type. This will only work if the Capture is actually an InMemCapture.
-		if inMem, ok := interface{}(c).(*InMemCapture); ok {
+func WithLinkType(linkType LinkType) Option {
+	return func(v interface{}) {
+		if inMem, ok := v.(*InMemCapture); ok {
 			inMem.currentLinkType = linkType
 		}
 	}
@@ -71,11 +73,25 @@ func (c *InMemCapture) getTSharkProcess() error {
 		return nil
 	}
 
+	tsharkPath, err := tshark.GetTSharkPath(c.TSharkPath)
+	if err != nil {
+		return fmt.Errorf("error finding tshark path: %w", err)
+	}
+
+	// Determine heuristic protocol name based on TShark version
+	heuristicProto := "ssl"
+	if version, err := tshark.GetTSharkVersion(tsharkPath); err == nil {
+		// version format is "vX.Y.Z". Standard Wireshark >= 4.0.0 uses "tls_tcp" for SSL heuristic decode
+		if semver.IsValid(version) && semver.Compare(version, "v4.0.0") >= 0 {
+			heuristicProto = "tls_tcp"
+		}
+	}
+
 	// Set up command line arguments for reading from stdin and outputting JSON
-	args := []string{"--enable-heuristic", "ssl", "-i", "-", "-o", "tcp.relative_sequence_numbers:FALSE", "-Tjson"}
+	args := []string{"--enable-heuristic", heuristicProto, "-i", "-", "-o", "tcp.relative_sequence_numbers:FALSE", "-Tjson"}
 
 	// Create the command
-	cmd, err := tshark.RunTSharkCommand(c.TSharkPath, args...)
+	cmd, err := tshark.RunTSharkCommand(tsharkPath, args...)
 	if err != nil {
 		return fmt.Errorf("error creating tshark command: %w", err)
 	}
@@ -140,12 +156,8 @@ func (c *InMemCapture) writePCAPHeader(writer io.Writer) error {
 	return nil
 }
 
-// writePacket writes a single packet with its header to the TShark process.
-func (c *InMemCapture) writePacket(packet []byte, sniffTime *time.Time) error {
-	if c.currentTShark.Stdin == nil {
-		return fmt.Errorf("tshark stdin not initialized")
-	}
-
+// writePacket writes a single packet with its header to the given writer.
+func (c *InMemCapture) writePacket(w io.Writer, packet []byte, sniffTime *time.Time) error {
 	// Packet header (16 bytes)
 	// typedef struct pcaprec_hdr_s {
 	//     guint32 ts_sec;     /* timestamp seconds */
@@ -179,14 +191,14 @@ func (c *InMemCapture) writePacket(packet []byte, sniffTime *time.Time) error {
 		return fmt.Errorf("error writing original length: %w", err)
 	}
 
-	// Write packet header and data to TShark's stdin
-	_, err = c.currentTShark.Stdin.Write(packetHeader.Bytes())
+	// Write packet header and data to writer
+	_, err = w.Write(packetHeader.Bytes())
 	if err != nil {
-		return fmt.Errorf("error writing packet header to stdin: %w", err)
+		return fmt.Errorf("error writing packet header to writer: %w", err)
 	}
-	_, err = c.currentTShark.Stdin.Write(packet)
+	_, err = w.Write(packet)
 	if err != nil {
-		return fmt.Errorf("error writing packet data to stdin: %w", err)
+		return fmt.Errorf("error writing packet data to writer: %w", err)
 	}
 
 	return nil
@@ -194,32 +206,66 @@ func (c *InMemCapture) writePacket(packet []byte, sniffTime *time.Time) error {
 
 // writePacketToTSharkStdin writes a single packet with its header to the TShark process's stdin.
 func (c *InMemCapture) writePacketToTSharkStdin(packet []byte, sniffTime *time.Time) error {
-	// Write PCAP header if not already written
 	if c.currentTShark.Stdin == nil {
 		return fmt.Errorf("tshark stdin not initialized")
 	}
 
-	// Write PCAP header only once
+	// Write PCAP header only once to TShark stdin
 	if !c.pcapHeaderWritten {
 		err := c.writePCAPHeader(c.currentTShark.Stdin)
 		if err != nil {
-			return fmt.Errorf("error writing pcap header: %w", err)
+			return fmt.Errorf("error writing pcap header to stdin: %w", err)
 		}
 		c.pcapHeaderWritten = true
 	}
 
-	return c.writePacket(packet, sniffTime)
+	// If OutputFile is configured, open it and write header + packets to it
+	if c.OutputFile != "" && c.outputFile == nil {
+		f, err := os.Create(c.OutputFile)
+		if err != nil {
+			return fmt.Errorf("error creating output file %s: %w", c.OutputFile, err)
+		}
+		c.outputFile = f
+		err = c.writePCAPHeader(c.outputFile)
+		if err != nil {
+			f.Close()
+			c.outputFile = nil
+			return fmt.Errorf("error writing pcap header to output file: %w", err)
+		}
+	}
+
+	// Write packet to TShark stdin
+	err := c.writePacket(c.currentTShark.Stdin, packet, sniffTime)
+	if err != nil {
+		return fmt.Errorf("error writing packet to stdin: %w", err)
+	}
+
+	// Write packet to OutputFile if configured
+	if c.outputFile != nil {
+		err = c.writePacket(c.outputFile, packet, sniffTime)
+		if err != nil {
+			return fmt.Errorf("error writing packet to output file: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // Close closes the TShark process and cleans up resources.
 func (c *InMemCapture) Close() error {
+	if c.outputFile != nil {
+		c.outputFile.Close()
+		c.outputFile = nil
+	}
 	if c.currentTShark.Process != nil {
 		c.currentTShark.Stdin.Close()
 		c.cmd.Process.Kill()
+		_ = c.cmd.Wait()
 		c.currentTShark.Process = nil
 		c.currentTShark.Stderr = nil
 		c.currentTShark.Stdin = nil
 	}
+	c.pcapHeaderWritten = false
 	return nil
 }
 
@@ -234,13 +280,20 @@ func (c *InMemCapture) ParsePacket(binaryPacket []byte, sniffTime *time.Time) (*
 	// Write the packet to TShark's stdin
 	err = c.writePacketToTSharkStdin(binaryPacket, sniffTime)
 	if err != nil {
+		c.Close()
 		return nil, fmt.Errorf("error writing packet to tshark stdin: %w", err)
 	}
 
+	// Close stdin to signal EOF to TShark
+	c.currentTShark.Stdin.Close()
+
 	packets, err := c.readPacketsFromTShark(1)
 	if err != nil {
+		c.Close()
 		return nil, err
 	}
+
+	c.Close()
 
 	if len(packets) == 0 {
 		return nil, fmt.Errorf("no packet parsed")
@@ -265,11 +318,23 @@ func (c *InMemCapture) ParsePackets(binaryPackets [][]byte, sniffTimes []*time.T
 		}
 		err = c.writePacketToTSharkStdin(binaryPacket, sniffTime)
 		if err != nil {
+			c.Close()
 			return nil, fmt.Errorf("error writing packet %d to tshark stdin: %w", i, err)
 		}
 	}
 
-	return c.readPacketsFromTShark(len(binaryPackets))
+	// Close stdin to signal EOF to TShark
+	c.currentTShark.Stdin.Close()
+
+	packets, err := c.readPacketsFromTShark(len(binaryPackets))
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
+
+	c.Close()
+
+	return packets, nil
 }
 
 // readPacketsFromTShark reads and parses packets from the TShark process.
@@ -285,20 +350,19 @@ func (c *InMemCapture) readPacketsFromTShark(expectedCount int) ([]*packet.Packe
 		return nil, fmt.Errorf("error reading TShark output: %w", err)
 	}
 
-	// Check for errors from TShark
+	// Read stderr to capture any error messages or warnings
 	var stderrBuffer bytes.Buffer
 	_, err = io.Copy(&stderrBuffer, c.currentTShark.Stderr)
 	if err != nil {
 		return nil, fmt.Errorf("error reading TShark stderr: %w", err)
 	}
 
-	if stderrBuffer.Len() > 0 {
-		return nil, fmt.Errorf("TShark error: %s", stderrBuffer.String())
-	}
-
 	// Parse the output into packets
 	packets, err := packet.ParsePackets(outputBuffer.Bytes())
 	if err != nil {
+		if stderrBuffer.Len() > 0 {
+			return nil, fmt.Errorf("error parsing packet JSON: %w (TShark stderr: %s)", err, stderrBuffer.String())
+		}
 		return nil, fmt.Errorf("error parsing packet JSON: %w", err)
 	}
 

@@ -15,7 +15,7 @@ type LiveRingCapture struct {
 }
 
 // NewLiveRingCapture creates a new LiveRingCapture instance.
-func NewLiveRingCapture(interfaces []string, options ...func(*Capture)) (*LiveRingCapture, error) {
+func NewLiveRingCapture(interfaces []string, options ...Option) (*LiveRingCapture, error) {
 	// Create the base LiveCapture
 	lc, err := NewLiveCapture(interfaces, options...)
 	if err != nil {
@@ -30,27 +30,37 @@ func NewLiveRingCapture(interfaces []string, options ...func(*Capture)) (*LiveRi
 		RingFileName: "/tmp/goshark.pcap",
 	}
 
+	for _, option := range options {
+		option(lrc)
+	}
+
 	return lrc, nil
 }
 
 // WithRingFileSize sets the size of the ring file in kB.
-func WithRingFileSize(size int) func(*LiveRingCapture) {
-	return func(lrc *LiveRingCapture) {
-		lrc.RingFileSize = size
+func WithRingFileSize(size int) Option {
+	return func(v interface{}) {
+		if lrc, ok := v.(*LiveRingCapture); ok {
+			lrc.RingFileSize = size
+		}
 	}
 }
 
 // WithNumRingFiles sets the number of ring files to keep.
-func WithNumRingFiles(num int) func(*LiveRingCapture) {
-	return func(lrc *LiveRingCapture) {
-		lrc.NumRingFiles = num
+func WithNumRingFiles(num int) Option {
+	return func(v interface{}) {
+		if lrc, ok := v.(*LiveRingCapture); ok {
+			lrc.NumRingFiles = num
+		}
 	}
 }
 
 // WithRingFileName sets the name of the ring file.
-func WithRingFileName(name string) func(*LiveRingCapture) {
-	return func(lrc *LiveRingCapture) {
-		lrc.RingFileName = name
+func WithRingFileName(name string) Option {
+	return func(v interface{}) {
+		if lrc, ok := v.(*LiveRingCapture); ok {
+			lrc.RingFileName = name
+		}
 	}
 }
 

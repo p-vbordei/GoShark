@@ -2,10 +2,11 @@ package tests
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"GoShark/tshark"
 )
 
 // TestDataPath returns the absolute path to the test data directory.
@@ -37,10 +38,9 @@ func GetTestEKPath(filename string) string {
 
 // SkipIfNoTShark skips the test if TShark is not available.
 func SkipIfNoTShark(t *testing.T) {
-	// Check if tshark is available in PATH
-	_, err := exec.LookPath("tshark")
+	_, err := tshark.FindTShark()
 	if err != nil {
-		t.Skip("TShark not found in PATH, skipping test")
+		t.Skip("TShark not found, skipping test")
 	}
 }
 

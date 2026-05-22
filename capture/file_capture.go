@@ -14,10 +14,16 @@ type FileCapture struct {
 }
 
 // NewFileCapture creates a new FileCapture instance.
-func NewFileCapture(filePath string, options ...func(*Capture)) (*FileCapture, error) {
+func NewFileCapture(filePath string, options ...Option) (*FileCapture, error) {
 	c := &FileCapture{
-		Capture:  *NewCapture(options...),
+		Capture: Capture{
+			UseJSON: true,
+		},
 		FilePath: filePath,
+	}
+
+	for _, option := range options {
+		option(c)
 	}
 
 	// Check if the file exists and is readable
