@@ -13,30 +13,30 @@ import (
 
 // FieldOffset represents the position and size of a field in the raw packet data.
 type FieldOffset struct {
-	Start  int    // Byte offset from the beginning of the packet
-	Length int    // Length of the field in bytes
-	Name   string // Field name
+	Start    int    // Byte offset from the beginning of the packet
+	Length   int    // Length of the field in bytes
+	Name     string // Field name
 	Showname string // Field display name
 }
 
 // Field represents a protocol field with its value and metadata.
 type Field struct {
-	Name     string      // Field name
-	Value    interface{} // Field value
-	Showname string      // Field display name
+	Name     string       // Field name
+	Value    interface{}  // Field value
+	Showname string       // Field display name
 	Offset   *FieldOffset // Field offset information, if available
 }
 
 // Layer represents a generic protocol layer with dynamic fields.
 type Layer struct {
-	Name      string                 `json:"-"` // The name of the layer (e.g., "eth", "ip")
-	Fields    map[string]interface{} `json:",inline"` // All fields of the layer
-	Offsets   map[string]*FieldOffset `json:"-"` // Field offsets for raw data access
-	Pos       int                    `json:"-"` // Position of this layer in the packet (byte offset)
-	Len       int                    `json:"-"` // Length of this layer in bytes
-	JSONLayer interface{}            `json:"-"` // Concrete layers.JSONLayer representation
-	XMLLayer  interface{}            `json:"-"` // Concrete layers.XMLLayer representation
-	EKLayer   interface{}            `json:"-"` // Concrete layers.EKLayer representation
+	Name      string                  `json:"-"`       // The name of the layer (e.g., "eth", "ip")
+	Fields    map[string]interface{}  `json:",inline"` // All fields of the layer
+	Offsets   map[string]*FieldOffset `json:"-"`       // Field offsets for raw data access
+	Pos       int                     `json:"-"`       // Position of this layer in the packet (byte offset)
+	Len       int                     `json:"-"`       // Length of this layer in bytes
+	JSONLayer interface{}             `json:"-"`       // Concrete layers.JSONLayer representation
+	XMLLayer  interface{}             `json:"-"`       // Concrete layers.XMLLayer representation
+	EKLayer   interface{}             `json:"-"`       // Concrete layers.EKLayer representation
 }
 
 // GetField retrieves a field's value from the layer by its name.
@@ -65,20 +65,20 @@ func (l *Layer) GetFieldHex(name string) string {
 	if val == nil {
 		return ""
 	}
-	
+
 	// Convert to string if not already
 	valStr := fmt.Sprintf("%v", val)
-	
+
 	// If it's already a hex string (starts with 0x), return it
 	if strings.HasPrefix(valStr, "0x") {
 		return valStr[2:] // Remove 0x prefix
 	}
-	
+
 	// Try to convert to integer and then to hex
 	if intVal, err := strconv.ParseInt(valStr, 10, 64); err == nil {
 		return fmt.Sprintf("%x", intVal)
 	}
-	
+
 	// Return as is if conversion fails
 	return valStr
 }
@@ -89,15 +89,15 @@ func (l *Layer) GetFieldInt(name string) (int64, error) {
 	if val == nil {
 		return 0, fmt.Errorf("field %s not found", name)
 	}
-	
+
 	// Convert to string if not already
 	valStr := fmt.Sprintf("%v", val)
-	
+
 	// If it's a hex string (starts with 0x), parse as hex
 	if strings.HasPrefix(valStr, "0x") {
 		return strconv.ParseInt(valStr[2:], 16, 64)
 	}
-	
+
 	// Try to parse as decimal
 	return strconv.ParseInt(valStr, 10, 64)
 }
@@ -155,11 +155,11 @@ type Packet struct {
 	} `json:"_source"`
 
 	// Flattened metadata from frame layer for easier access, populated during UnmarshalJSON
-	FrameNumber      string
-	FrameLen         string
-	FrameCapLen      string
-	FrameTimeEpoch   string
-	FrameTime        string
+	FrameNumber    string
+	FrameLen       string
+	FrameCapLen    string
+	FrameTimeEpoch string
+	FrameTime      string
 
 	// Raw packet data, populated during UnmarshalJSON if available
 	RawData []byte
@@ -528,7 +528,7 @@ func (p *Packet) GetRawPacket() []byte {
 	if p.RawData != nil && len(p.RawData) > 0 {
 		return p.RawData
 	}
-	
+
 	// If no raw data is available, check if we have a frame_raw field
 	if frameLayer := p.GetLayer("frame"); frameLayer != nil {
 		if frameRaw, ok := frameLayer.Fields["frame.raw"]; ok {
@@ -543,7 +543,7 @@ func (p *Packet) GetRawPacket() []byte {
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -554,13 +554,13 @@ func (p *Packet) GetLayerRawBytes(layerName string) []byte {
 	if layer == nil || p.RawData == nil || layer.Pos < 0 || layer.Len <= 0 {
 		return nil
 	}
-	
+
 	// Make sure we don't go out of bounds
 	if layer.Pos+layer.Len > len(p.RawData) {
 		return nil
 	}
-	
-	return p.RawData[layer.Pos:layer.Pos+layer.Len]
+
+	return p.RawData[layer.Pos : layer.Pos+layer.Len]
 }
 
 // GetFieldRawBytes returns the raw bytes for a specific field in a layer.
@@ -570,18 +570,18 @@ func (p *Packet) GetFieldRawBytes(layerName, fieldName string) []byte {
 	if layer == nil || p.RawData == nil {
 		return nil
 	}
-	
+
 	fieldOffset := layer.GetFieldOffset(fieldName)
 	if fieldOffset == nil || fieldOffset.Start < 0 || fieldOffset.Length <= 0 {
 		return nil
 	}
-	
+
 	// Make sure we don't go out of bounds
 	if fieldOffset.Start+fieldOffset.Length > len(p.RawData) {
 		return nil
 	}
-	
-	return p.RawData[fieldOffset.Start:fieldOffset.Start+fieldOffset.Length]
+
+	return p.RawData[fieldOffset.Start : fieldOffset.Start+fieldOffset.Length]
 }
 
 // NewPacketFromJSON takes raw TShark JSON output for a single packet and unmarshals it into a Packet struct.

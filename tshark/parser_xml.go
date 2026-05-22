@@ -39,7 +39,7 @@ func WithXMLIncludeRaw(includeRaw bool) func(*XMLParser) {
 
 // PDML represents the root element of TShark's PDML output.
 type PDML struct {
-	XMLName xml.Name `xml:"pdml"`
+	XMLName xml.Name     `xml:"pdml"`
 	Packets []PDMLPacket `xml:"packet"`
 }
 
@@ -52,9 +52,9 @@ type PDMLPacket struct {
 
 // PDMLProto represents a protocol layer in TShark's PDML output.
 type PDMLProto struct {
-	XMLName xml.Name   `xml:"proto"`
-	Name    string     `xml:"name,attr"`
-	Showname string     `xml:"showname,attr"`
+	XMLName  xml.Name    `xml:"proto"`
+	Name     string      `xml:"name,attr"`
+	Showname string      `xml:"showname,attr"`
 	Fields   []PDMLField `xml:"field"`
 }
 

@@ -168,10 +168,10 @@ func TestEKLayer(t *testing.T) {
 
 func TestEKMultiField(t *testing.T) {
 	fieldsDict := map[string]interface{}{
-		"tcp_flags":            "0x0002",
-		"tcp_flags_syn":        "1",
-		"tcp_flags_ack":        "0",
-		"tcp_flags_cwr_foo":    "0", // deep nesting
+		"tcp_flags":         "0x0002",
+		"tcp_flags_syn":     "1",
+		"tcp_flags_ack":     "0",
+		"tcp_flags_cwr_foo": "0", // deep nesting
 	}
 	ekLayer := NewEKLayer("tcp", fieldsDict)
 

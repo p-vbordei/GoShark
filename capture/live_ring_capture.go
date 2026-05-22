@@ -9,9 +9,9 @@ import (
 // LiveRingCapture represents a live capture with ring buffer functionality.
 type LiveRingCapture struct {
 	*LiveCapture
-	RingFileSize  int    // Size of the ring file in kB
-	NumRingFiles  int    // Number of ring files to keep
-	RingFileName  string // Name of the ring file
+	RingFileSize int    // Size of the ring file in kB
+	NumRingFiles int    // Number of ring files to keep
+	RingFileName string // Name of the ring file
 }
 
 // NewLiveRingCapture creates a new LiveRingCapture instance.

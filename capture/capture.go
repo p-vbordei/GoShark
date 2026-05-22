@@ -17,22 +17,22 @@ import (
 
 // Capture represents a base for different tshark capture types.
 type Capture struct {
-	DisplayFilter string
-	CaptureFilter string
-	TSharkPath    string
-	UseJSON       bool
-	IncludeRaw    bool
-	Decodes       []string
-	EncryptionKeys []string
+	DisplayFilter       string
+	CaptureFilter       string
+	TSharkPath          string
+	UseJSON             bool
+	IncludeRaw          bool
+	Decodes             []string
+	EncryptionKeys      []string
 	OverridePreferences []string
-	PacketCount   int
-	Snaplen       int
-	Promiscuous   bool
-	MonitorMode   bool
-	OutputFile    string
-	UseEK         bool // Use tshark's Elastic Common Schema (-T ek) output.
-	KeepPackets   bool // Retain packets passed through LoadPackets (pyshark keep_packets).
-	additionalArgs []string
+	PacketCount         int
+	Snaplen             int
+	Promiscuous         bool
+	MonitorMode         bool
+	OutputFile          string
+	UseEK               bool // Use tshark's Elastic Common Schema (-T ek) output.
+	KeepPackets         bool // Retain packets passed through LoadPackets (pyshark keep_packets).
+	additionalArgs      []string
 
 	packets []*packet.Packet // Buffer populated by LoadPackets.
 	debug   bool             // When true, tshark stderr is logged.
@@ -82,7 +82,7 @@ func NewCapture(options ...Option) *Capture {
 
 // WithDisplayFilter sets the Wireshark display filter for the capture (e.g., "http.request").
 // Corresponds to tshark's -Y flag.
-func WithDisplayFilter(filter string) Option { 
+func WithDisplayFilter(filter string) Option {
 	return func(v interface{}) {
 		if c := getCapture(v); c != nil {
 			c.DisplayFilter = filter
