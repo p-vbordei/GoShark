@@ -80,6 +80,26 @@ func TestFileCaptureIntegrationXML(t *testing.T) {
 	require.Equal(t, "frame", first.Layers[0].Name)
 }
 
+func TestFileCaptureIntegrationEK(t *testing.T) {
+	requireTShark(t)
+
+	fc, err := NewFileCapture(testPcap, WithUseEK(true))
+	require.NoError(t, err)
+
+	pkts := collect(t, fc)
+	require.Len(t, pkts, 5, "EK capture should yield all 5 packets")
+
+	first := pkts[0]
+	require.Equal(t, "1", first.FrameNumber)
+	require.NotEmpty(t, first.FrameLen)
+	require.True(t, first.HasLayer("frame"))
+	require.True(t, first.HasLayer("ip"))
+
+	st, err := first.SniffTime()
+	require.NoError(t, err)
+	require.False(t, st.IsZero())
+}
+
 func TestInMemCaptureIntegration(t *testing.T) {
 	requireTShark(t)
 

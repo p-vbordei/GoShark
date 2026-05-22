@@ -271,12 +271,15 @@ func (c *Capture) getTSharkArgs() ([]string, error) {
 		args = append(args, "-w", c.OutputFile)
 	}
 
-	if c.UseJSON {
-		// Check tshark version for JSON support and --no-duplicate-keys
-		// For now, assume modern tshark that supports JSON and --no-duplicate-keys
+	switch {
+	case c.UseEK:
+		// Elastic Common Schema: newline-delimited JSON.
+		args = append(args, "-T", "ek")
+	case c.UseJSON:
+		// Assume a modern tshark that supports JSON and --no-duplicate-keys.
 		args = append(args, "-T", "json", "--no-duplicate-keys")
-	} else {
-		// Default to PDML if not JSON
+	default:
+		// Default to PDML (XML).
 		args = append(args, "-T", "pdml")
 	}
 
@@ -415,7 +418,37 @@ func (c *Capture) sniffStream(ctx context.Context, stdout io.ReadCloser, stderr 
 		defer close(outChan)
 		defer close(done)
 
-		if c.UseJSON {
+		if c.UseEK {
+			// EK output is newline-delimited JSON: one record per line,
+			// alternating {"index":...} metadata and packet records.
+			decoder := json.NewDecoder(stdout)
+			parser := tshark.NewEKParser(tshark.WithEKIncludeRaw(c.IncludeRaw))
+			for decoder.More() {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				var raw json.RawMessage
+				if err := decoder.Decode(&raw); err != nil {
+					return
+				}
+				pkt, ok, err := parser.ParseRecord(raw)
+				if err != nil {
+					return
+				}
+				if !ok {
+					continue // an {"index":...} metadata line
+				}
+
+				select {
+				case <-ctx.Done():
+					return
+				case outChan <- pkt:
+				}
+			}
+		} else if c.UseJSON {
 			decoder := json.NewDecoder(stdout)
 			// Read the first token which must be '['
 			t, err := decoder.Token()

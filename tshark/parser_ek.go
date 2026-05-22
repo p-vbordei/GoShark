@@ -1,6 +1,7 @@
 package tshark
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,174 +13,190 @@ import (
 	"GoShark/packet/layers"
 )
 
-// EKParser handles parsing of TShark Elastic Common Schema (EK) output.
+// EKParser handles parsing of TShark Elastic Common Schema (-T ek) output.
+//
+// Real tshark -T ek output is newline-delimited JSON: alternating
+// {"index":{...}} metadata lines and {"timestamp":"<epoch-ms>","layers":{...}}
+// packet lines. EK field names are underscore-flattened and double-prefixed
+// (e.g. the frame number is "frame_frame_number").
 type EKParser struct {
-	// Configuration options
 	IncludeRaw bool
 }
 
 // NewEKParser creates a new EKParser instance.
 func NewEKParser(options ...func(*EKParser)) *EKParser {
-	parser := &EKParser{
-		IncludeRaw: false,
-	}
-
+	parser := &EKParser{IncludeRaw: false}
 	for _, option := range options {
 		option(parser)
 	}
-
 	return parser
 }
 
 // WithEKIncludeRaw sets whether to include raw packet data in the parsed output.
 func WithEKIncludeRaw(includeRaw bool) func(*EKParser) {
-	return func(p *EKParser) {
-		p.IncludeRaw = includeRaw
+	return func(p *EKParser) { p.IncludeRaw = includeRaw }
+}
+
+// ekRecord is one newline-delimited JSON record of tshark -T ek output.
+type ekRecord struct {
+	Index     json.RawMessage `json:"index"`
+	Timestamp string          `json:"timestamp"`
+	Layers    json.RawMessage `json:"layers"`
+}
+
+// ekOrderedLayer is one entry from the EK "layers" object, in document order.
+type ekOrderedLayer struct {
+	name string
+	raw  json.RawMessage
+}
+
+// decodeEKLayers walks the EK "layers" JSON object preserving key order.
+func decodeEKLayers(raw json.RawMessage) ([]ekOrderedLayer, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	t, err := dec.Token()
+	if err != nil {
+		return nil, err
 	}
+	if d, ok := t.(json.Delim); !ok || d != '{' {
+		return nil, fmt.Errorf("ek layers: expected JSON object")
+	}
+
+	var out []ekOrderedLayer
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, _ := keyTok.(string)
+
+		var val json.RawMessage
+		if err := dec.Decode(&val); err != nil {
+			return nil, err
+		}
+		out = append(out, ekOrderedLayer{name: key, raw: val})
+	}
+	return out, nil
 }
 
-// EKDocument represents a single document in TShark's EK output.
-type EKDocument struct {
-	Index  EKIndex  `json:"_index"`
-	Source EKSource `json:"_source"`
-}
-
-// EKIndex contains index information for an EK document.
-type EKIndex struct {
-	Type string `json:"_type"`
-}
-
-// EKSource contains the packet data in an EK document.
-type EKSource struct {
-	Layers    map[string]json.RawMessage `json:"layers"`
-	Timestamp time.Time                  `json:"timestamp"`
-}
-
-// ParsePackets reads TShark EK output from the provided reader and returns a slice of Packet objects.
+// ParsePackets reads TShark EK output (NDJSON) and returns the packets,
+// skipping the {"index":...} metadata lines.
 func (p *EKParser) ParsePackets(r io.Reader) ([]*packet.Packet, error) {
-	// Create a JSON decoder for streaming JSON parsing
 	decoder := json.NewDecoder(r)
 
-	// Read documents from the stream
-	var documents []EKDocument
+	var packets []*packet.Packet
 	for decoder.More() {
-		var doc EKDocument
-		if err := decoder.Decode(&doc); err != nil {
-			return nil, fmt.Errorf("failed to decode EK document: %w", err)
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			return nil, fmt.Errorf("failed to decode EK record: %w", err)
 		}
-		documents = append(documents, doc)
-	}
-
-	// Convert documents to packets
-	packets := make([]*packet.Packet, 0, len(documents))
-	for _, doc := range documents {
-		pkt, err := p.convertEKDocument(&doc)
+		pkt, ok, err := p.ParseRecord(raw)
 		if err != nil {
-			return nil, fmt.Errorf("failed to convert EK document: %w", err)
+			return nil, err
 		}
-		packets = append(packets, pkt)
+		if ok {
+			packets = append(packets, pkt)
+		}
 	}
-
 	return packets, nil
 }
 
-// convertEKDocument converts an EKDocument to a Packet.
-func (p *EKParser) convertEKDocument(doc *EKDocument) (*packet.Packet, error) {
-	// Create a new Packet
-	pkt := &packet.Packet{}
-
-	// Set timestamp from EK document
-	pkt.FrameTime = doc.Source.Timestamp.Format(time.RFC3339)
-	
-	// Extract frame information if available
-	if frameData, ok := doc.Source.Layers["frame"]; ok {
-		var frameLayer map[string]interface{}
-		if err := json.Unmarshal(frameData, &frameLayer); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal frame layer: %w", err)
-		}
-		
-		// Extract frame number
-		if frameNum := getStringOrNumberValue(frameLayer, "frame_number", "frame.number"); frameNum != "" {
-			pkt.FrameNumber = frameNum
-		}
-		
-		// Extract frame length
-		if frameLen := getStringOrNumberValue(frameLayer, "frame_len", "frame.len"); frameLen != "" {
-			pkt.FrameLen = frameLen
-		}
-		
-		// Extract capture length
-		if frameCapLen := getStringOrNumberValue(frameLayer, "frame_cap_len", "frame.cap_len"); frameCapLen != "" {
-			pkt.FrameCapLen = frameCapLen
-		}
-		
-		// Extract epoch time
-		if frameTimeEpoch := getStringOrNumberValue(frameLayer, "frame_time_epoch", "frame.time_epoch"); frameTimeEpoch != "" {
-			pkt.FrameTimeEpoch = frameTimeEpoch
-		}
+// ParseRecord converts one EK NDJSON record into a Packet. The returned bool is
+// false for non-packet records (the {"index":...} metadata lines), which
+// callers should skip.
+func (p *EKParser) ParseRecord(raw json.RawMessage) (*packet.Packet, bool, error) {
+	var rec ekRecord
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		return nil, false, fmt.Errorf("failed to unmarshal EK record: %w", err)
+	}
+	if len(rec.Layers) == 0 {
+		return nil, false, nil // an {"index":...} metadata line
 	}
 
-	// Convert layers
-	pkt.Layers = make([]packet.Layer, 0, len(doc.Source.Layers))
-	for layerName, layerData := range doc.Source.Layers {
-		layer, err := p.convertEKLayer(layerName, layerData)
+	ordered, err := decodeEKLayers(rec.Layers)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to decode EK layers: %w", err)
+	}
+
+	pkt := &packet.Packet{}
+	// tshark -T ek emits the timestamp as epoch milliseconds.
+	if ms, err := strconv.ParseInt(rec.Timestamp, 10, 64); err == nil {
+		pkt.FrameTime = time.UnixMilli(ms).Format(time.RFC3339Nano)
+	}
+
+	pkt.Layers = make([]packet.Layer, 0, len(ordered))
+	for _, ol := range ordered {
+		layer, err := p.convertEKLayer(ol.name, ol.raw)
 		if err != nil {
-			return nil, fmt.Errorf("failed to convert layer %s: %w", layerName, err)
+			return nil, false, fmt.Errorf("failed to convert layer %s: %w", ol.name, err)
+		}
+		if ol.name == "frame" {
+			p.extractEKFrameInfo(pkt, layer.Fields)
 		}
 		pkt.Layers = append(pkt.Layers, *layer)
 	}
+	return pkt, true, nil
+}
 
-	return pkt, nil
+// extractEKFrameInfo fills the packet's frame metadata from an EK frame layer.
+func (p *EKParser) extractEKFrameInfo(pkt *packet.Packet, fields map[string]interface{}) {
+	pkt.FrameNumber = ekFieldString(fields, "frame_frame_number", "frame.number", "frame_number")
+	pkt.FrameLen = ekFieldString(fields, "frame_frame_len", "frame.len", "frame_len")
+	pkt.FrameCapLen = ekFieldString(fields, "frame_frame_cap_len", "frame.cap_len", "frame_cap_len")
+	if epoch := ekFieldString(fields, "frame_frame_time_epoch", "frame.time_epoch", "frame_time_epoch"); epoch != "" {
+		pkt.FrameTimeEpoch = epoch
+	}
+}
+
+// ekFieldString returns the first present key's value, coerced to a string.
+func ekFieldString(m map[string]interface{}, keys ...string) string {
+	for _, k := range keys {
+		if v, ok := m[k]; ok {
+			switch x := v.(type) {
+			case string:
+				return x
+			case float64:
+				return strconv.FormatFloat(x, 'f', -1, 64)
+			case bool:
+				return strconv.FormatBool(x)
+			default:
+				return fmt.Sprintf("%v", v)
+			}
+		}
+	}
+	return ""
 }
 
 // convertEKLayer converts a layer from EK format to a Layer.
 func (p *EKParser) convertEKLayer(layerName string, layerData json.RawMessage) (*packet.Layer, error) {
-	// Create a new Layer
 	layer := &packet.Layer{
-		Name:   layerName,
-		Fields: make(map[string]interface{}),
+		Name:    layerName,
+		Fields:  make(map[string]interface{}),
+		Offsets: make(map[string]*packet.FieldOffset),
 	}
 
-	// Unmarshal the layer data
 	var fields map[string]interface{}
 	if err := json.Unmarshal(layerData, &fields); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal layer data: %w", err)
 	}
 
-	// Add fields to the layer
 	for fieldName, fieldValue := range fields {
-		// Handle nested fields
-		if nestedMap, ok := fieldValue.(map[string]interface{}); ok {
-			// Create a nested layer
-			nestedLayer := &packet.Layer{
-				Name:   fmt.Sprintf("%s.%s", layerName, fieldName),
-				Fields: nestedMap,
-			}
-			
-			// Add the nested layer to the fields
-			layer.Fields[fieldName] = nestedLayer
-		} else {
-			// Add the field directly
-			layer.Fields[fieldName] = fieldValue
-		}
+		layer.Fields[fieldName] = fieldValue
 	}
 
-	// Instantiate and assign EKLayer
 	layer.EKLayer = layers.NewEKLayer(layerName, fields)
-
 	return layer, nil
 }
 
-// ParseSinglePacket parses a single packet from an EK JSON string.
+// ParseSinglePacket parses a single EK packet record from a JSON string.
 func (p *EKParser) ParseSinglePacket(jsonData string) (*packet.Packet, error) {
-	// Parse as EK document
-	var doc EKDocument
-	if err := json.Unmarshal([]byte(jsonData), &doc); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal EK document: %w", err)
+	pkt, ok, err := p.ParseRecord(json.RawMessage(jsonData))
+	if err != nil {
+		return nil, err
 	}
-
-	// Convert to packet
-	return p.convertEKDocument(&doc)
+	if !ok {
+		return nil, fmt.Errorf("EK record is not a packet line")
+	}
+	return pkt, nil
 }
 
 // ParseTSharkEK is a convenience function that creates an EKParser and parses packets from a reader.
@@ -193,25 +210,3 @@ func ParseTSharkEKString(jsonData string, includeRaw bool) ([]*packet.Packet, er
 	parser := NewEKParser(WithEKIncludeRaw(includeRaw))
 	return parser.ParsePackets(strings.NewReader(jsonData))
 }
-
-func getStringOrNumberValue(m map[string]interface{}, key1, key2 string) string {
-	var val interface{}
-	var ok bool
-	if val, ok = m[key1]; !ok {
-		if val, ok = m[key2]; !ok {
-			return ""
-		}
-	}
-	switch v := val.(type) {
-	case string:
-		return v
-	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64)
-	case int:
-		return strconv.Itoa(v)
-	case int64:
-		return strconv.FormatInt(v, 10)
-	}
-	return fmt.Sprintf("%v", val)
-}
-
