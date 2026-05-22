@@ -1,312 +1,226 @@
 # GoShark
 
-GoShark is a Go implementation of the Python `pyshark` library, providing a powerful interface to TShark (the command-line version of Wireshark) for packet capture and analysis in Go applications. It leverages `tshark` for packet capture and analysis, similar to how `pyshark` operates.
+GoShark is a Go port of the Python [`pyshark`](https://github.com/KimiNewt/pyshark) library: a wrapper around TShark (the command-line interface to Wireshark) for packet capture and analysis in Go applications.
 
 ## Features
 
-- **Multiple Capture Types**: Support for live captures, file captures, remote captures, pipe captures, and in-memory captures
-- **Flexible Filtering**: Apply display filters (Wireshark syntax) and capture filters (BPF syntax)
-- **JSON/XML/EK Output**: Parse TShark output in JSON, XML (PDML), or Elastic Common Schema formats
-- **Layer Access**: Easy access to packet layers and fields with a clean API
-- **Raw Packet Data**: Access to raw packet bytes, field offsets, and values in different bases
-- **Session Tracking**: Track network sessions and conversations across multiple packets
-- **PCAP Export**: Write captured packets to PCAP files
-- **Configuration Management**: Load and save settings from configuration files
-- **Caching**: Cache TShark output for improved performance
-- **Comprehensive Tests**: Extensive test suite covering all major functionality
-
-## Installation
-
-```bash
-go install github.com/vladbordei/GoShark@latest
-```
+- **Multiple capture types** — file, live, remote, pipe, and in-memory captures
+- **Flexible filtering** — Wireshark display filters and BPF capture filters
+- **JSON / PDML / EK output** — parse TShark output in JSON, XML (PDML), or Elastic Common Schema form
+- **Layer access** — ordered protocol layers with prefix-aware field lookup
+- **Packet buffering** — eager `LoadPackets` with indexed access, or streaming callbacks
+- **Raw packet data** — raw bytes, field offsets, and per-layer byte ranges (when the capture carries raw data)
+- **Session tracking** — group packets into conversations by 5-tuple
+- **Configuration & caching** — platform-specific config and cache directories
 
 ## Requirements
 
-- Go 1.16 or higher
-- Wireshark/TShark installed and available in your system's PATH
+- Go 1.24 or higher
+- Wireshark / TShark installed and on your `PATH` (live capture also needs `dumpcap`)
 
-## Environmental Variables
+## Installation
 
-- `TSHARK_PATH`: (Optional) Specifies a custom path for the TShark executable. If not set, GoShark will attempt to find TShark in your system's PATH.
-- `DUMPCAP_PATH`: (Optional) Specifies a custom path for the dumpcap executable (used for live captures). If not set, GoShark will attempt to find dumpcap in your system's PATH.
-- `GO_SHARK_CACHE_DIR`: (Optional) Override default cache directory. If not set, GoShark will default to platform-specific cache paths.
-- `GO_SHARK_CONFIG_DIR`: (Optional) Override default config directory. If not set, GoShark will default to platform-specific config paths.
+GoShark is currently consumed as a source module named `GoShark`. Clone and build it:
+
+```bash
+git clone https://github.com/p-vbordei/GoShark.git
+cd GoShark
+go build ./...
+```
+
+Import packages as `GoShark/capture`, `GoShark/packet`, and `GoShark/tshark`.
+
+## Environment Variables
+
+- `TSHARK_PATH` — custom path to the `tshark` executable (otherwise found on `PATH`)
+- `DUMPCAP_PATH` — custom path to the `dumpcap` executable (used for live captures)
+- `GO_SHARK_CACHE_DIR` — override the default cache directory
+- `GO_SHARK_CONFIG_DIR` — override the default config directory
 
 ## Project Structure
 
-GoShark is organized into several key directories, each responsible for a specific aspect of the library:
+- `capture` — capture types (file, live, remote, pipe, in-memory) and the streaming engine
+- `packet` — the `Packet` and `Layer` types, field access, and session tracking
+- `tshark` — TShark process management, version detection, and JSON/PDML/EK parsers
+- `config`, `cache` — configuration and output caching
+- `utils`, `errors` — shared helpers and error types
+- `tests` — integration tests and fixtures
+- `docs/superpowers` — design spec and implementation plan
 
-- `capture`: Contains implementations for various packet capture types (live, file, in-memory, etc.).
-- `packet`: Defines the `Packet` structure and related functionalities for parsing and accessing packet data.
-- `tshark`: Handles the execution of TShark commands and manages TShark-related configurations.
-- `utils`: Provides utility functions used across the project.
-- `tests`: Contains comprehensive tests for all major functionalities.
+## Usage
 
-## Dependencies and APIs
+### File capture
 
-GoShark leverages the following Go packages and external tools:
-
-- `os/exec`: Used for executing external commands, primarily `tshark`.
-- `golang.org/x/mod/semver`: Utilized for semantic versioning comparisons of TShark.
-- **TShark**: The core dependency, providing packet capture and analysis capabilities. GoShark acts as a wrapper around the TShark command-line tool.
-
-## Comprehensive Test Suite
-
-GoShark includes an extensive test suite to ensure the reliability and correctness of its functionalities. Tests cover:
-
-- Packet handling and parsing.
-- Various capture types (live, file, in-memory).
-- TShark command execution and output processing.
-
-To run the tests, navigate to the project root and execute:
-
-```bash
-go test ./...
-```
-
-## Basic Usage
-
-### Live Capture Example
+`ApplyOnPackets` streams packets to a callback; return `true` from the callback to stop early.
 
 ```go
 package main
 
 import (
+	"context"
 	"fmt"
-	"GoShark/capture"
-)
+	"log"
 
-func main() {
-	// Create a new live capture on interface "eth0"
-	cap := capture.NewLiveCapture(
-		capture.WithInterface("eth0"),
-		capture.WithDisplayFilter("http"),
-		capture.WithPacketCount(10),
-	)
-
-	// Start the capture
-	packets, err := cap.Capture()
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
-	}
-
-	// Process captured packets
-	for _, packet := range packets {
-		fmt.Printf("Packet: %s\n", packet.SniffTime())
-		
-		// Access HTTP layer if present
-		if httpLayer := packet.GetLayer("http"); httpLayer != nil {
-			host := httpLayer.GetField("host")
-			if host != nil {
-				fmt.Printf("HTTP Host: %s\n", host)
-			}
-		}
-	}
-}
-```
-
-### File Capture Example
-
-```go
-package main
-
-import (
-	"fmt"
-	"GoShark/capture"
-)
-
-func main() {
-	// Create a new file capture
-	cap := capture.NewFileCapture(
-		capture.WithInputFile("path/to/capture.pcap"),
-		capture.WithDisplayFilter("tcp"),
-	)
-
-	// Start the capture
-	packets, err := cap.Capture()
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
-	}
-
-	// Process captured packets
-	for _, packet := range packets {
-		fmt.Printf("Packet #%s: %s\n", packet.FrameNumber, packet.SniffTime())
-	}
-}
-```
-
-### In-Memory Packet Processing
-
-```go
-package main
-
-import (
-    "fmt"
-    "io/ioutil"
-    "strings"
-    "GoShark/capture"
-)
-
-func main() {
-    // Read raw packet data from a file
-    rawPacket, err := ioutil.ReadFile("raw_packet.bin")
-    if err != nil {
-        fmt.Printf("Error reading file: %v\n", err)
-        return
-    }
-
-    // Create an in-memory capture
-    cap := capture.NewInMemCapture()
-
-    // Parse the raw packet
-    pkt, err := cap.ParsePacket(rawPacket, nil)
-    if err != nil {
-        // Skip if TShark isn't available or stdin not initialized
-        if strings.Contains(err.Error(), "tshark stdin not initialized") {
-            fmt.Println("Skipping in-memory packet processing: TShark not found or not initialized")
-            return
-        }
-        fmt.Printf("Error parsing packet: %v\n", err)
-        return
-    }
-
-    // Display parsed packet
-    fmt.Printf("Parsed packet: %+v\n", pkt)
-}
-```
-
-### Session Tracking
-
-```go
-package main
-
-import (
-	"fmt"
 	"GoShark/capture"
 	"GoShark/packet"
 )
 
 func main() {
-	// Create a live capture
-	cap := capture.NewLiveCapture(
-		capture.WithInterface("eth0"),
+	cap, err := capture.NewFileCapture("capture.pcap",
 		capture.WithDisplayFilter("tcp"),
 	)
-
-	// Create a session tracker
-	tracker := packet.NewSessionTracker()
-
-	// Start capturing packets
-	packets, err := cap.Capture()
 	if err != nil {
-		fmt.Printf("Error capturing packets: %v\n", err)
-		return
+		log.Fatal(err)
 	}
 
-	// Add packets to the session tracker
-	for _, p := range packets {
-		tracker.AddPacket(p)
-	}
-
-	// Get all sessions
-	sessions := tracker.GetAllSessions()
-	
-	// Print session information
-	for i, session := range sessions {
-		fmt.Printf("Session %d: %s\n", i+1, session.Key.String())
-		fmt.Printf("  Packets: %d\n", session.GetPacketCount())
-		fmt.Printf("  State: %s\n", session.State)
-		fmt.Printf("  Duration: %d seconds\n", session.GetDuration())
+	err = cap.ApplyOnPackets(func(p *packet.Packet) bool {
+		sniffTime, _ := p.SniffTime()
+		fmt.Printf("Packet %s | len=%s | highest=%s | %s\n",
+			p.FrameNumber, p.FrameLen, p.HighestLayer(), sniffTime)
+		return false // return true to stop early
+	}, context.Background())
+	if err != nil {
+		log.Fatal(err)
 	}
 }
 ```
 
-### Raw Packet Data Access
+### Buffered access (`LoadPackets`)
+
+For indexed, random access — pyshark's `keep_packets` behaviour. Pass `0` to load every packet, or a positive count to cap it.
 
 ```go
-package main
+cap, _ := capture.NewFileCapture("capture.pcap")
 
-import (
-	"fmt"
-	"encoding/hex"
-	"GoShark/capture"
+packets, err := cap.LoadPackets(context.Background(), 0) // 0 = all packets
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Printf("loaded %d packets\n", cap.Len())
+first := cap.Get(0)
+fmt.Println("first packet highest layer:", first.HighestLayer())
+_ = packets // cap.Packets() returns the same slice
+```
+
+`ApplyOnPacketsWithLimit` adds pyshark's `packet_count` and `timeout` limits:
+
+```go
+cap.ApplyOnPacketsWithLimit(func(p *packet.Packet) bool {
+	fmt.Println(p.HighestLayer())
+	return false
+}, context.Background(), 100 /* packet_count */, 5*time.Second /* timeout */)
+```
+
+### Live capture
+
+Live capture reads from one or more interfaces and usually requires elevated privileges (e.g. `sudo`).
+
+```go
+cap, err := capture.NewLiveCapture([]string{"en0"},
+	capture.WithBPFFilter("tcp port 80"),
+	capture.WithPacketCount(10),
 )
+if err != nil {
+	log.Fatal(err)
+}
 
-func main() {
-	// Create a file capture
-	cap := capture.NewFileCapture(
-		capture.WithInputFile("sample.pcap"),
-	)
+err = cap.ApplyOnPackets(func(p *packet.Packet) bool {
+	fmt.Println(p.HighestLayer())
+	return false
+}, context.Background())
+```
 
-	// Capture packets
-	packets, err := cap.Capture()
-	if err != nil {
-		fmt.Printf("Error capturing packets: %v\n", err)
-		return
+### Layers and fields
+
+Layers are exposed in protocol order. Field lookup is prefix-aware — on a `tcp` layer, `Field("srcport")` resolves `tcp.srcport`.
+
+```go
+cap.ApplyOnPackets(func(p *packet.Packet) bool {
+	if ip := p.Layer("ip"); ip != nil {
+		fmt.Printf("%v -> %v\n", ip.Field("src"), ip.Field("dst"))
 	}
-
-	if len(packets) > 0 {
-		// Get the first packet
-		p := packets[0]
-
-		// Get raw packet data
-		rawData := p.GetRawPacket()
-		fmt.Printf("Raw packet data: %s\n", hex.EncodeToString(rawData))
-
-		// Get a specific layer's raw bytes
-		ethLayer := p.GetLayerRawBytes("eth")
-		if ethLayer != nil {
-			fmt.Printf("Ethernet layer data: %s\n", hex.EncodeToString(ethLayer))
-		}
-
-		// Get a specific field's raw bytes
-		ipSrc := p.GetFieldRawBytes("ip", "ip.src")
-		if ipSrc != nil {
-			fmt.Printf("IP source address raw bytes: %s\n", hex.EncodeToString(ipSrc))
-		}
+	if tcp := p.Layer("tcp"); tcp != nil {
+		fmt.Println("src port:", tcp.Field("srcport"))         // short name
+		fmt.Println("dst port:", tcp.GetField("tcp.dstport"))  // fully-qualified name
 	}
+	fmt.Print(p.String()) // pretty-print every layer and field
+	return false
+}, context.Background())
+```
+
+### In-memory packet parsing
+
+```go
+cap := capture.NewInMemCapture(capture.WithLinkType(capture.LinkTypeEthernet))
+defer cap.Close()
+
+pkt, err := cap.ParsePacket(rawPacketBytes, nil)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(pkt.HighestLayer())
+```
+
+### Output modes
+
+GoShark defaults to TShark's JSON output. Select PDML (XML) or EK explicitly:
+
+```go
+capture.NewFileCapture("capture.pcap", capture.WithUseJSON(false)) // PDML/XML
+capture.NewFileCapture("capture.pcap", capture.WithUseEK(true))    // Elastic Common Schema
+```
+
+### Session tracking
+
+```go
+tracker := packet.NewSessionTracker()
+
+cap, _ := capture.NewFileCapture("capture.pcap")
+cap.ApplyOnPackets(func(p *packet.Packet) bool {
+	tracker.AddPacket(p)
+	return false
+}, context.Background())
+
+for i, s := range tracker.GetAllSessions() {
+	fmt.Printf("Session %d: %s — %d packets, state %s\n",
+		i+1, s.Key.String(), s.GetPacketCount(), s.State)
 }
 ```
 
-## Running the Example Application
+### Raw packet data
 
-To run the example application, ensure you have TShark installed and available in your system's PATH.
+When the underlying TShark output carries raw bytes, packets expose them:
 
-```bash
-go run main.go
+```go
+raw := p.GetRawPacket()                       // whole frame
+ethBytes := p.GetLayerRawBytes("eth")          // one layer's bytes
+ipSrc := p.GetFieldRawBytes("ip", "ip.src")    // one field's bytes
 ```
 
-**Note**: For testing purposes, `main.go` is configured to capture a limited number of packets (currently 10) to prevent an infinite capture loop. You can modify this limit in `main.go` or extend the `capture` package to support other capture termination conditions.
+## Running the Example
 
-## Current Status
+`main.go` reads the bundled `test.pcap` and prints a summary of each packet:
 
-The project has implemented most of the core functionality of the Python `pyshark` library, including:
+```bash
+go run .
+```
 
-- ✅ All capture types (live, file, remote, pipe, in-memory)
-- ✅ JSON, XML, and EK output parsing
-- ✅ Layer and field access
-- ✅ Display and capture filtering
-- ✅ PCAP export
-- ✅ Configuration management
-- ✅ Cache management
-- ✅ Packet dissection details (raw bytes, field offsets)
-- ✅ Session/conversation tracking
-- ✅ Comprehensive test suite
+## Testing
 
-Upcoming features:
+```bash
+go test ./...
+```
 
-- 🔄 Protocol-specific parsers
+The suite includes integration tests that run real TShark against the bundled `test.pcap` for the file, in-memory, pipe, and EK capture paths. These tests skip cleanly when TShark is not installed.
 
-## Detailed Progress
+## Documentation
 
-See `progress.md` for detailed updates on implementation status.
+The design spec and implementation plan for the pyshark-parity work live under [`docs/superpowers`](docs/superpowers).
 
-## Lessons Learned
+## Author
 
-See `lessons_learned.md` for insights and challenges encountered during development.
+Vlad Bordei — [github.com/p-vbordei](https://github.com/p-vbordei)
 
 ## License
 
