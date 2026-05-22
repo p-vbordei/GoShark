@@ -64,15 +64,14 @@ func WithRingFileName(name string) Option {
 	}
 }
 
-// Start begins the live ring capture process.
-func (lrc *LiveRingCapture) Start() (stdout io.ReadCloser, stderr io.ReadCloser, err error) {
-	// Get the base tshark arguments
+// getRingTSharkArgs builds the full tshark argument vector for a ring capture:
+// the base capture arguments plus the ring-buffer flags and interfaces.
+func (lrc *LiveRingCapture) getRingTSharkArgs() ([]string, error) {
 	tsharkArgs, err := lrc.getTSharkArgs()
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get tshark arguments: %w", err)
+		return nil, fmt.Errorf("failed to get tshark arguments: %w", err)
 	}
 
-	// Add ring buffer parameters
 	tsharkArgs = append(tsharkArgs,
 		"-b", "filesize:"+strconv.Itoa(lrc.RingFileSize),
 		"-b", "files:"+strconv.Itoa(lrc.NumRingFiles),
@@ -81,12 +80,19 @@ func (lrc *LiveRingCapture) Start() (stdout io.ReadCloser, stderr io.ReadCloser,
 		"-V", // Verbose output
 	)
 
-	// Add interface parameters
 	for _, iface := range lrc.Interfaces {
 		tsharkArgs = append(tsharkArgs, "-i", iface)
 	}
 
-	// Start the capture process
+	return tsharkArgs, nil
+}
+
+// Start begins the live ring capture process.
+func (lrc *LiveRingCapture) Start() (stdout io.ReadCloser, stderr io.ReadCloser, err error) {
+	tsharkArgs, err := lrc.getRingTSharkArgs()
+	if err != nil {
+		return nil, nil, err
+	}
 	return lrc.Capture.startWithArgs(tsharkArgs)
 }
 
