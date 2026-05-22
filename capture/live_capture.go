@@ -118,21 +118,27 @@ func (lc *LiveCapture) Start() (stdout io.ReadCloser, stderr io.ReadCloser, err 
 		return nil, nil, fmt.Errorf("failed to get dumpcap stdout pipe: %w", err)
 	}
 
-	// Get dumpcap stderr for error logging
-	_, err = dumpcapCmd.StderrPipe()
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get dumpcap stderr pipe: %w", err)
-	}
+	// Discard dumpcap's stderr. The pipe must still be drained — an unread,
+	// full stderr pipe would block dumpcap — so io.Discard is wired up via the
+	// copier goroutine os/exec starts for a non-*os.File writer.
+	dumpcapCmd.Stderr = io.Discard
 
 	// Start dumpcap
 	if err := dumpcapCmd.Start(); err != nil {
 		return nil, nil, fmt.Errorf("failed to start dumpcap: %w", err)
 	}
 
+	// cleanupDumpcap kills and reaps dumpcap. The error paths below use it so a
+	// failed startup never leaves dumpcap behind as a zombie.
+	cleanupDumpcap := func() {
+		dumpcapCmd.Process.Kill()
+		_ = dumpcapCmd.Wait()
+	}
+
 	// Get tshark parameters
 	tsharkParams, err := lc.getTSharkArgs()
 	if err != nil {
-		dumpcapCmd.Process.Kill()
+		cleanupDumpcap()
 		return nil, nil, fmt.Errorf("failed to get tshark parameters: %w", err)
 	}
 
@@ -142,7 +148,7 @@ func (lc *LiveCapture) Start() (stdout io.ReadCloser, stderr io.ReadCloser, err 
 	// Start tshark process
 	tsharkPath, err := tshark.GetTSharkPath(lc.TSharkPath)
 	if err != nil {
-		dumpcapCmd.Process.Kill()
+		cleanupDumpcap()
 		return nil, nil, fmt.Errorf("failed to get tshark path: %w", err)
 	}
 
@@ -154,24 +160,25 @@ func (lc *LiveCapture) Start() (stdout io.ReadCloser, stderr io.ReadCloser, err 
 	// Get tshark stdout
 	tsharkStdout, err := tsharkCmd.StdoutPipe()
 	if err != nil {
-		dumpcapCmd.Process.Kill()
+		cleanupDumpcap()
 		return nil, nil, fmt.Errorf("failed to get tshark stdout pipe: %w", err)
 	}
 
 	// Get tshark stderr
 	tsharkStderr, err := tsharkCmd.StderrPipe()
 	if err != nil {
-		dumpcapCmd.Process.Kill()
+		cleanupDumpcap()
 		return nil, nil, fmt.Errorf("failed to get tshark stderr pipe: %w", err)
 	}
 
 	// Start tshark
 	if err := tsharkCmd.Start(); err != nil {
-		dumpcapCmd.Process.Kill()
+		cleanupDumpcap()
 		return nil, nil, fmt.Errorf("failed to start tshark: %w", err)
 	}
 
-	// Store the tshark command
+	// Store both commands so Stop can kill and reap dumpcap as well as tshark.
+	lc.dumpcapCmd = dumpcapCmd
 	lc.cmd = tsharkCmd
 
 	return tsharkStdout, tsharkStderr, nil
