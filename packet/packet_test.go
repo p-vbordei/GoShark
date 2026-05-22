@@ -80,3 +80,33 @@ func TestSniffTimeFormats(t *testing.T) {
 		t.Errorf("SniffTimestamp() = %q", pf.SniffTimestamp())
 	}
 }
+
+// TestPacketPrettyAndAccessors verifies String/PrettyPrint, InterfaceCaptured
+// and prefix-aware field access (pyshark allows layer.srcport for tcp.srcport).
+func TestPacketPrettyAndAccessors(t *testing.T) {
+	data := []byte(`[{"_source":{"layers":{
+"frame":{"frame.number":"1","frame.interface_name":"lo0"},
+"tcp":{"tcp.srcport":"58894"}}}}]`)
+	p, err := NewPacketFromJSON(data)
+	if err != nil {
+		t.Fatalf("NewPacketFromJSON: %v", err)
+	}
+
+	if !strings.Contains(p.String(), "Layer TCP") {
+		t.Errorf("String() should contain %q, got:\n%s", "Layer TCP", p.String())
+	}
+	if p.InterfaceCaptured() != "lo0" {
+		t.Errorf("InterfaceCaptured() = %q, want %q", p.InterfaceCaptured(), "lo0")
+	}
+
+	tcp := p.Layer("tcp")
+	if tcp == nil {
+		t.Fatalf("Layer(\"tcp\") returned nil")
+	}
+	if got := tcp.Field("srcport"); got != "58894" {
+		t.Errorf("Field(\"srcport\") = %v, want %q", got, "58894")
+	}
+	if got := tcp.Field("tcp.srcport"); got != "58894" {
+		t.Errorf("Field(\"tcp.srcport\") = %v, want %q", got, "58894")
+	}
+}

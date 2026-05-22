@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +42,21 @@ type Layer struct {
 // GetField retrieves a field's value from the layer by its name.
 func (l *Layer) GetField(name string) interface{} {
 	return l.Fields[name]
+}
+
+// Field looks up a field by short or fully-qualified name. A short name like
+// "srcport" on a "tcp" layer resolves "tcp.srcport"; a name that already
+// contains a "." is used verbatim. This mirrors pyshark's attribute access.
+func (l *Layer) Field(name string) interface{} {
+	if v, ok := l.Fields[name]; ok {
+		return v
+	}
+	if !strings.Contains(name, ".") {
+		if v, ok := l.Fields[l.Name+"."+name]; ok {
+			return v
+		}
+	}
+	return nil
 }
 
 // GetFieldHex retrieves a field's value as a hexadecimal string.
@@ -116,9 +132,11 @@ func (l *Layer) Get(name string, defaultValue interface{}) interface{} {
 
 // PrettyPrint returns a formatted string representation of the layer.
 func (l *Layer) PrettyPrint() string {
-	s := fmt.Sprintf("Layer %s:\n", l.Name)
-	for _, fieldName := range l.FieldNames() {
-		s += fmt.Sprintf("  %s: %v\n", fieldName, l.Fields[fieldName])
+	s := fmt.Sprintf("Layer %s:\n", strings.ToUpper(l.Name))
+	names := l.FieldNames()
+	sort.Strings(names)
+	for _, fieldName := range names {
+		s += fmt.Sprintf("\t%s: %v\n", fieldName, l.Fields[fieldName])
 	}
 	return s
 }
@@ -419,6 +437,45 @@ func (p *Packet) GetLayer(name string) *Layer {
 		}
 	}
 	return nil
+}
+
+// Layer retrieves a layer by name (alias of GetLayer, pyshark-style accessor).
+func (p *Packet) Layer(name string) *Layer {
+	return p.GetLayer(name)
+}
+
+// InterfaceCaptured returns the capture interface name/id/description from the
+// frame layer, or "" when unavailable.
+func (p *Packet) InterfaceCaptured() string {
+	f := p.GetLayer("frame")
+	if f == nil {
+		return ""
+	}
+	for _, k := range []string{"frame.interface_name", "frame.interface_id", "frame.interface_description"} {
+		if v, ok := f.Fields[k]; ok {
+			return fmt.Sprintf("%v", v)
+		}
+	}
+	return ""
+}
+
+// String renders the packet layer-by-layer (pyshark's pretty_print equivalent).
+func (p *Packet) String() string {
+	var b strings.Builder
+	if p.FrameNumber != "" {
+		fmt.Fprintf(&b, "Packet (frame %s)\n", p.FrameNumber)
+	} else {
+		b.WriteString("Packet\n")
+	}
+	for i := range p.Layers {
+		b.WriteString(p.Layers[i].PrettyPrint())
+	}
+	return b.String()
+}
+
+// PrettyPrint is an alias for String.
+func (p *Packet) PrettyPrint() string {
+	return p.String()
 }
 
 // GetLayerByIndex retrieves a layer by its index.
