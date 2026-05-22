@@ -8,6 +8,7 @@ import (
 	"io"
 	"os/exec"
 	"strconv"
+	"time"
 
 	"GoShark/packet"
 	"GoShark/packet/layers"
@@ -517,4 +518,31 @@ func (c *Capture) ApplyOnPackets(callback func(*packet.Packet) bool, ctx context
 			}
 		}
 	}
+}
+
+// ApplyOnPacketsWithLimit is ApplyOnPackets with pyshark's packet_count and
+// timeout limits: it stops after packetCount packets (packetCount <= 0 means
+// unlimited) or once timeout elapses (timeout <= 0 means no timeout). Reaching
+// either limit is a normal stop, not an error.
+func (c *Capture) ApplyOnPacketsWithLimit(callback func(*packet.Packet) bool,
+	ctx context.Context, packetCount int, timeout time.Duration,
+	startFunc func() (io.ReadCloser, io.ReadCloser, error)) error {
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	n := 0
+	err := c.ApplyOnPackets(func(p *packet.Packet) bool {
+		n++
+		stop := callback(p)
+		return stop || (packetCount > 0 && n >= packetCount)
+	}, ctx, startFunc)
+
+	// A timeout is a normal stop condition rather than a failure.
+	if err == context.DeadlineExceeded {
+		return nil
+	}
+	return err
 }

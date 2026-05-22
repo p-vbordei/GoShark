@@ -126,6 +126,29 @@ func TestCaptureLoadPackets(t *testing.T) {
 	require.Len(t, all, 5)
 }
 
+func TestApplyOnPacketsWithLimit(t *testing.T) {
+	requireTShark(t)
+
+	fc, err := NewFileCapture(testPcap)
+	require.NoError(t, err)
+
+	n := 0
+	err = fc.ApplyOnPacketsWithLimit(func(p *packet.Packet) bool {
+		n++
+		return false
+	}, context.Background(), 2, 0)
+	require.NoError(t, err)
+	require.Equal(t, 2, n, "packet_count=2 should stop after 2 packets")
+
+	// A tiny timeout is a normal stop condition, not an error.
+	fc2, err := NewFileCapture(testPcap)
+	require.NoError(t, err)
+	err = fc2.ApplyOnPacketsWithLimit(func(p *packet.Packet) bool {
+		return false
+	}, context.Background(), 0, time.Nanosecond)
+	require.NoError(t, err)
+}
+
 func TestPipeCaptureIntegration(t *testing.T) {
 	requireTShark(t)
 

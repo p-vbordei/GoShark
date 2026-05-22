@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"GoShark/packet"
 	"GoShark/tshark"
@@ -102,4 +103,11 @@ func (c *FileCapture) ApplyOnPackets(callback func(*packet.Packet) bool, ctx con
 // all) and buffers them for indexed access via Get/Len/Packets.
 func (c *FileCapture) LoadPackets(ctx context.Context, count int) ([]*packet.Packet, error) {
 	return c.Capture.LoadPackets(ctx, count, c.Start)
+}
+
+// ApplyOnPacketsWithLimit applies the callback, stopping after packetCount
+// packets or once timeout elapses (see Capture.ApplyOnPacketsWithLimit).
+func (c *FileCapture) ApplyOnPacketsWithLimit(callback func(*packet.Packet) bool,
+	ctx context.Context, packetCount int, timeout time.Duration) error {
+	return c.Capture.ApplyOnPacketsWithLimit(callback, ctx, packetCount, timeout, c.Start)
 }
